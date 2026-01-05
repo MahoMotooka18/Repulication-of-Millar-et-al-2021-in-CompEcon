@@ -1,0 +1,74 @@
+# Configuration for Section 5 Experiment (Krusell-Smith 1998)
+
+# Random seed
+seed: 42
+
+# Model parameters (Krusell-Smith 1998)
+model:
+  # Preferences
+  gamma: 1.0          # Log utility
+  beta: 0.96          # Discount factor
+  
+  # Production
+  alpha: 0.36         # Capital share
+  delta: 0.08         # Depreciation rate
+  
+  # Idiosyncratic process
+  rho_y: 0.9
+  sigma_y: 0.0871779789 #0.2 * sqrt(1 - 0.9**2)  # Adjusted volatility
+  
+  # Aggregate process
+  rho_z: 0.95
+  sigma_z: 0.01
+  
+  # Default agent count (will be overridden in grid)
+  num_agents: 1000
+  horizon: 100
+
+# Training configuration
+training:
+  # Objectives to train: lifetime_reward, euler, bellman
+  objectives:
+    - lifetime_reward
+    - euler
+    - bellman
+  
+  # Agent count grid
+  agent_counts: [1, 5, 10, 50, 100, 500, 1000]
+  
+  # Neural network
+  hidden_size: 64
+  distribution_features: 3
+
+  # Training hyperparameters
+  num_epochs: 10000 #original 300000
+  simulation_length: 10000 #original 300000
+  train_every: 10
+  train_points: 100
+  pretrain_value_iters: 10000 #original 100000
+  learning_rate: 0.001
+  batch_size: 64
+  
+  # Evaluation
+  eval_interval: 100 
+  eval_horizon: 1000
+  
+  # Weights for complementarity/optimality
+  nu: 1.0
+  nu_h: 1.0
+
+# Plotting configuration
+plotting:
+  smoothing_window: 200
+  show_raw: true
+
+# Debug logging
+debug:
+  enabled: false
+  interval: 1000
+
+# Output configuration
+output_dir: outputs/section5
+
+# Device
+device: cpu
