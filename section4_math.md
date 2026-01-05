@@ -244,6 +244,59 @@ Save all outputs to `outputs/section4/`:
   - `training_curves_euler.png`
   - `training_curves_bellman.png`
 
+## 6.1 Evaluation pipeline (shared across objectives)
+
+- All objectives (`lifetime_reward`, `euler`, `bellman`) must use the same `evaluate_metrics()` function for evaluation.
+- Loss and evaluation metrics must be computed once and reused for display and CSV logging (no separate "display" vs "save" paths).
+- Metric failures must not create empty cells in CSV. Use NaN/0/empty-string per schema and log failures to debug artifacts.
+
+## 6.2 Numerical stability & metric robustness
+
+Common causes of NaN/Inf include: `c<=0`, division by zero, log/sqrt domain violations, overflow.
+
+Rules:
+- Guard: explicitly check finite values and domain constraints before aggregation.
+- Collect: record `violation_count` and sample violations for debugging.
+- Save: record `euler_fb_finite_ratio` (ratio of finite elements used in the metric).
+- Exceptions: if metric computation fails, fill metrics with NaN (or 0/empty string per schema) and log the exception to debug artifacts.
+
+## 6.3 Metric schema (no blank cells)
+
+All metrics CSVs (`metrics.csv` and `metrics_<objective>.csv`) must share the same schema and forbid blank cells.
+
+Required columns:
+- `run_id`
+- `timestamp`
+- `git_hash` (if available; otherwise empty string)
+- `objective` (`lifetime_reward`, `euler`, `bellman`)
+- `network_size` (e.g., `8x8`)
+- `epoch`
+- `loss`
+- `euler_fb_mean` (NaN if not computable)
+- `euler_fb_finite_ratio` (0..1, 0 if not computable)
+- `violation_count` (integer; use 0 if not computable)
+- `warning_count` (integer runtime warning count)
+- `exception_flag` (0/1)
+- `exception_type` (empty string if none)
+- `exception_message` (empty string if none)
+- `lifetime_reward_mean` (NaN if not computable)
+
+No-blank rule:
+- Numeric metrics: NaN or 0 as specified; never leave empty cells.
+- String fields: empty string if not available.
+- Integer fields: 0 if not available.
+
+## 6.4 Debug artifacts & failure reporting
+
+Save debug artifacts under `outputs/section4/<run_id>/debug/`:
+- `metrics_failures.jsonl` (one JSON per metric failure/exception).
+- `violations_samples.jsonl` (sample violations like `c<=0`, up to K samples).
+- `warnings.log` (captured runtime warnings).
+- `config_snapshot.json` (experiment configuration snapshot).
+
+Plotting rule:
+- Plot generation must not fail when NaN values are present; NaNs are treated as missing data, and a debug note is recorded.
+
 ---
 
 # 7. Acceptance Criteria

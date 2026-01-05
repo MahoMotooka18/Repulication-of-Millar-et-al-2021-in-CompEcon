@@ -12,6 +12,9 @@ import argparse
 import yaml
 import ast
 import math
+import warnings
+import traceback
+import subprocess
 import torch
 import torch.optim as optim
 import numpy as np
@@ -99,18 +102,31 @@ class ExperimentRunner:
 
     def setup_directories(self):
         """Create output directories."""
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        run_id = f"{timestamp}"
+        self.run_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.run_id = f"{self.run_timestamp}"
         self.output_dir = Path(self.config.get(
             'output_dir',
             'outputs/section4'
-        )) / run_id
+        )) / self.run_id
 
         self.checkpoint_dir = self.output_dir / 'checkpoints'
         self.plot_dir = self.output_dir / 'plots'
+        self.debug_dir = self.output_dir / 'debug'
 
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         self.plot_dir.mkdir(parents=True, exist_ok=True)
+        self.debug_dir.mkdir(parents=True, exist_ok=True)
+
+        self.metrics_failures_path = self.debug_dir / 'metrics_failures.jsonl'
+        self.violations_samples_path = self.debug_dir / 'violations_samples.jsonl'
+        self.warnings_log_path = self.debug_dir / 'warnings.log'
+        self.config_snapshot_path = self.debug_dir / 'config_snapshot.json'
+
+        self.metrics_failures_path.touch(exist_ok=True)
+        self.violations_samples_path.touch(exist_ok=True)
+        self.warnings_log_path.touch(exist_ok=True)
+
+        self.git_hash = self._get_git_hash()
 
         print(f"Output directory: {self.output_dir}")
 
@@ -127,6 +143,9 @@ class ExperimentRunner:
         self.model = ConsumptionSavingModel(params)
         self.objective_computer = ObjectiveComputer(self.model, self.device)
         self.evaluator = Evaluator(self.model, self.device)
+        self.violation_sample_limit = int(
+            self.config.get('debug', {}).get('violation_sample_limit', 10)
+        )
 
     def run_experiment(self):
         """Run the full experiment."""
@@ -294,7 +313,7 @@ class ExperimentRunner:
                         f"Epoch {epoch}/{num_epochs} | "
                         f"Loss: {loss.item():.6e} | "
                         f"Euler FB (mean): "
-                        f"{eval_metrics['test_euler_residual_mean']:.6e}"
+                        f"{eval_metrics['euler_fb_mean']:.6e}"
                     )
 
         return pd.DataFrame(metrics)
@@ -478,31 +497,41 @@ class ExperimentRunner:
             eps_test = rng.standard_normal((num_steps, n_test))
             eps_test = torch.from_numpy(eps_test).float().to(self.device)
 
-            # Evaluate
-            metrics_dict = self.evaluator.evaluate(
+            context = {
+                'run_id': self.run_id,
+                'timestamp': datetime.now().isoformat(),
+                'objective': objective_name,
+                'network_size': f"{net_size}x{net_size}",
+                'epoch': int(epoch)
+            }
+
+            stats = self.evaluate_metrics(
                 policy,
                 y_test,
                 w_test,
                 eps_test,
-                num_steps=num_steps
+                num_steps,
+                context
             )
-
-            stats = self.evaluator.compute_statistics(metrics_dict)
 
         policy.train()
 
         result = {
-            'epoch': epoch,
-            'objective_train': loss_value,
-            'test_euler_residual_mean': stats['euler_fb_mean'],
-            'test_euler_residual_p50': stats['euler_fb_p50'],
-            'test_euler_residual_p90': stats['euler_fb_p90'],
-            'test_euler_residual_max': stats['euler_fb_max'],
-            'test_lifetime_reward_mean': stats['lifetime_reward_mean'],
-            'wall_time_sec': wall_time,
-            'seed': self.config['seed'],
-            'net_size': net_size,
-            'objective_name': objective_name
+            'run_id': self.run_id,
+            'timestamp': context['timestamp'],
+            'git_hash': self.git_hash,
+            'objective': objective_name,
+            'network_size': f"{net_size}x{net_size}",
+            'epoch': int(epoch),
+            'loss': float(loss_value),
+            'euler_fb_mean': stats['euler_fb_mean'],
+            'euler_fb_finite_ratio': stats['euler_fb_finite_ratio'],
+            'violation_count': int(stats['violation_count']),
+            'warning_count': int(stats['warning_count']),
+            'exception_flag': int(stats['exception_flag']),
+            'exception_type': stats['exception_type'],
+            'exception_message': stats['exception_message'],
+            'lifetime_reward_mean': stats['lifetime_reward_mean']
         }
 
         return result
@@ -528,8 +557,7 @@ class ExperimentRunner:
         """Save metrics to CSV."""
         dfs = []
         for net_size, df in metrics_by_size.items():
-            df = df.copy()
-            df['net_size'] = net_size
+            df = self._normalize_metrics_df(df.copy())
             dfs.append(df)
 
         combined = pd.concat(dfs, ignore_index=True)
@@ -543,9 +571,7 @@ class ExperimentRunner:
         dfs = []
         for objective_name, metrics_by_size in all_metrics.items():
             for net_size, df in metrics_by_size.items():
-                df_copy = df.copy()
-                df_copy['net_size'] = net_size
-                df_copy['objective_name'] = objective_name
+                df_copy = self._normalize_metrics_df(df.copy())
                 dfs.append(df_copy)
 
         if not dfs:
@@ -571,6 +597,20 @@ class ExperimentRunner:
 
         # Group by network size for plotting
         data_by_size = all_metrics
+        for size, df in data_by_size.items():
+            for series_key in ['loss', 'euler_fb_mean', 'lifetime_reward_mean']:
+                if series_key in df.columns:
+                    values = df[series_key].to_numpy()
+                    if not np.all(np.isfinite(values)):
+                        self._log_debug_note(
+                            f"NaN present in series {series_key} for size {size}",
+                            {
+                                'timestamp': datetime.now().isoformat(),
+                                'objective': objective_name,
+                                'network_size': f"{size}x{size}",
+                                'epoch': -1
+                            }
+                        )
 
         plot_path = (self.plot_dir /
                      f"training_curves_{objective_name}.png")
@@ -588,6 +628,8 @@ class ExperimentRunner:
         config_path = self.output_dir / 'config.yaml'
         with open(config_path, 'w') as f:
             yaml.dump(self.config, f)
+        with open(self.config_snapshot_path, 'w') as f:
+            json.dump(self.config, f, indent=2, sort_keys=True)
 
     def _collect_residuals(self, policy: NeuralNetworkPolicy) -> np.ndarray:
         """Collect Euler residuals for distribution plots."""
@@ -617,6 +659,154 @@ class ExperimentRunner:
             )
         policy.train()
         return metrics_dict['euler_residual_fb']
+
+    def _get_git_hash(self) -> str:
+        """Return current git hash or empty string if unavailable."""
+        try:
+            result = subprocess.run(
+                ['git', 'rev-parse', 'HEAD'],
+                capture_output=True,
+                text=True,
+                check=True,
+                cwd=str(Path(__file__).resolve().parent.parent)
+            )
+            return result.stdout.strip()
+        except Exception:
+            return ''
+
+    def _append_jsonl(self, path: Path, record: Dict):
+        """Append a JSON record to a jsonl file."""
+        with open(path, 'a') as f:
+            f.write(json.dumps(record) + "\n")
+
+    def _log_warnings(self, caught: List[warnings.WarningMessage], context: Dict):
+        """Write captured warnings to warnings.log."""
+        if not caught:
+            return
+        with open(self.warnings_log_path, 'a') as f:
+            for w in caught:
+                msg = str(w.message)
+                f.write(
+                    f"{context['timestamp']} | {context['objective']} | "
+                    f"{context['network_size']} | epoch={context['epoch']} | "
+                    f"{w.category.__name__} | {msg}\n"
+                )
+
+    def _log_debug_note(self, note: str, context: Dict):
+        """Write a debug note to warnings.log."""
+        with open(self.warnings_log_path, 'a') as f:
+            f.write(
+                f"{context['timestamp']} | {context['objective']} | "
+                f"{context['network_size']} | epoch={context['epoch']} | "
+                f"NOTE | {note}\n"
+            )
+
+    def _metrics_schema(self) -> List[str]:
+        """Return the required metrics schema."""
+        return [
+            'run_id',
+            'timestamp',
+            'git_hash',
+            'objective',
+            'network_size',
+            'epoch',
+            'loss',
+            'euler_fb_mean',
+            'euler_fb_finite_ratio',
+            'violation_count',
+            'warning_count',
+            'exception_flag',
+            'exception_type',
+            'exception_message',
+            'lifetime_reward_mean'
+        ]
+
+    def _normalize_metrics_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Ensure metrics DataFrame has the full schema and no blank columns."""
+        schema = self._metrics_schema()
+        defaults = {
+            'run_id': self.run_id,
+            'timestamp': '',
+            'git_hash': self.git_hash,
+            'objective': '',
+            'network_size': '',
+            'epoch': 0,
+            'loss': float('nan'),
+            'euler_fb_mean': float('nan'),
+            'euler_fb_finite_ratio': 0.0,
+            'violation_count': 0,
+            'warning_count': 0,
+            'exception_flag': 0,
+            'exception_type': '',
+            'exception_message': '',
+            'lifetime_reward_mean': float('nan')
+        }
+        for col in schema:
+            if col not in df.columns:
+                df[col] = defaults[col]
+        return df[schema]
+
+    def evaluate_metrics(
+        self,
+        policy,
+        y_test: torch.Tensor,
+        w_test: torch.Tensor,
+        eps_test: torch.Tensor,
+        num_steps: int,
+        context: Dict
+    ) -> Dict:
+        """Shared evaluation pipeline for all objectives."""
+        stats = {
+            'euler_fb_mean': float('nan'),
+            'euler_fb_finite_ratio': 0.0,
+            'violation_count': 0,
+            'warning_count': 0,
+            'exception_flag': 0,
+            'exception_type': '',
+            'exception_message': '',
+            'lifetime_reward_mean': float('nan')
+        }
+        caught_warnings: List[warnings.WarningMessage] = []
+        try:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always", RuntimeWarning)
+                metrics_dict = self.evaluator.evaluate(
+                    policy,
+                    y_test,
+                    w_test,
+                    eps_test,
+                    num_steps=num_steps,
+                    violation_sample_limit=self.violation_sample_limit
+                )
+                stats.update(self.evaluator.compute_statistics(metrics_dict))
+                stats['violation_count'] = int(metrics_dict.get('violation_count', 0))
+                caught_warnings = list(caught)
+                if metrics_dict.get('violation_samples'):
+                    self._append_jsonl(
+                        self.violations_samples_path,
+                        {
+                            **context,
+                            'violation_count': int(metrics_dict.get('violation_count', 0)),
+                            'samples': metrics_dict.get('violation_samples')
+                        }
+                    )
+        except Exception as exc:
+            stats['exception_flag'] = 1
+            stats['exception_type'] = type(exc).__name__
+            stats['exception_message'] = str(exc)
+            self._append_jsonl(
+                self.metrics_failures_path,
+                {
+                    **context,
+                    'exception_type': stats['exception_type'],
+                    'exception_message': stats['exception_message'],
+                    'traceback': traceback.format_exc()
+                }
+            )
+        finally:
+            stats['warning_count'] = len(caught_warnings)
+            self._log_warnings(caught_warnings, context)
+        return stats
 
 
 def main():

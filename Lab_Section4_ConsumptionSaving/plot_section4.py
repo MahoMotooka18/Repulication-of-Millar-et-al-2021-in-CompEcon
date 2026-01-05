@@ -42,8 +42,8 @@ class SectionPlotter:
         """Compute a simple moving average."""
         if window <= 1 or len(values) < window:
             return values
-        kernel = np.ones(window) / window
-        return np.convolve(values, kernel, mode='valid')
+        series = pd.Series(values)
+        return series.rolling(window, min_periods=1).mean().to_numpy()
 
     def plot_training_curves(
         self,
@@ -59,8 +59,8 @@ class SectionPlotter:
 
         Args:
             data_by_size: dict mapping network size -> DataFrame with
-                         columns: epoch, objective_train, test_euler_residual,
-                         test_lifetime_reward
+                         columns: epoch, loss, euler_fb_mean,
+                         lifetime_reward_mean
             objective_name: 'lifetime_reward', 'euler', or 'bellman'
             output_path: Path to save figure
             use_log_x: use log scale on x-axis
@@ -72,7 +72,7 @@ class SectionPlotter:
         for size in sorted(data_by_size.keys()):
             df = data_by_size[size]
             epochs = df['epoch'].to_numpy()
-            values = df['objective_train'].to_numpy()
+            values = df['loss'].to_numpy()
             if show_raw:
                 ax_a.plot(
                     epochs,
@@ -105,7 +105,7 @@ class SectionPlotter:
         for size in sorted(data_by_size.keys()):
             df = data_by_size[size]
             epochs = df['epoch'].to_numpy()
-            values = df['test_euler_residual_mean'].to_numpy()
+            values = df['euler_fb_mean'].to_numpy()
             if show_raw:
                 ax_b.plot(
                     epochs,
@@ -137,7 +137,7 @@ class SectionPlotter:
         for size in sorted(data_by_size.keys()):
             df = data_by_size[size]
             epochs = df['epoch'].to_numpy()
-            values = df['test_lifetime_reward_mean'].to_numpy()
+            values = df['lifetime_reward_mean'].to_numpy()
             if show_raw:
                 ax_c.plot(
                     epochs,
