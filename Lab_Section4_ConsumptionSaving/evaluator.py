@@ -32,7 +32,8 @@ class Evaluator:
         y_test: torch.Tensor,
         w_test: torch.Tensor,
         eps_test: torch.Tensor,
-        num_steps: int = 100
+        num_steps: int = 100,
+        violation_sample_limit: int = 0
     ) -> Dict[str, np.ndarray]:
         """
         Evaluate policy on test data.
@@ -57,6 +58,9 @@ class Evaluator:
         euler_residual_a = np.zeros((num_steps, n_test))
         euler_residual_h = np.zeros((num_steps, n_test))
         euler_residual_fb = np.zeros((num_steps, n_test))
+        violation_count = 0
+        violation_samples = []
+        eps = 1e-12
 
         y_t = y_test.clone()
         w_t = w_test.clone()
@@ -66,12 +70,39 @@ class Evaluator:
 
         with torch.no_grad():
             for t in range(num_steps):
-                # Get consumption
-                c_t = w_t * policy.forward_phi(y_t, w_t)
-                c_t = torch.clamp(c_t, min=torch.zeros_like(w_t), max=w_t)
+                # Get consumption with domain guard
+                c_raw = w_t * policy.forward_phi(y_t, w_t)
+                c_violation = (~torch.isfinite(c_raw) |
+                               ~torch.isfinite(w_t) |
+                               (c_raw <= 0.0) |
+                               (w_t <= 0.0))
+                if torch.any(c_violation):
+                    violation_count += int(torch.sum(c_violation).item())
+                    if violation_sample_limit > 0 and len(violation_samples) < violation_sample_limit:
+                        idxs = torch.nonzero(c_violation).flatten()
+                        for idx in idxs[:(violation_sample_limit - len(violation_samples))]:
+                            i = int(idx.item())
+                            violation_samples.append({
+                                't': int(t),
+                                'c_raw': float(c_raw[i].item()),
+                                'w_t': float(w_t[i].item()),
+                                'c_nonpositive': bool(c_raw[i].item() <= 0.0),
+                                'w_nonpositive': bool(w_t[i].item() <= 0.0),
+                                'c_nonfinite': bool(not torch.isfinite(c_raw[i]).item()),
+                                'w_nonfinite': bool(not torch.isfinite(w_t[i]).item())
+                            })
+
+                positive_w = w_t > 0.0
+                c_t = torch.where(
+                    positive_w,
+                    torch.clamp(c_raw, min=torch.zeros_like(w_t), max=w_t),
+                    torch.zeros_like(w_t)
+                )
 
                 # Utility at current consumption
-                u_c_t = self._utility_derivative_torch(c_t)
+                c_safe = torch.clamp(c_t, min=eps)
+                w_safe = torch.clamp(w_t, min=eps)
+                u_c_t = self._utility_derivative_torch(c_safe)
 
                 # Add to lifetime reward
                 u_t = self._utility_torch(c_t)
@@ -94,17 +125,23 @@ class Evaluator:
                 for node, weight in zip(gh_nodes_t, gh_weights_t):
                     y_next_gh = (self.model.params.rho * y_t +
                                  self.model.params.sigma * node)
-                    c_next = w_next * policy.forward_phi(y_next_gh, w_next)
-                    c_next = torch.clamp(
-                        c_next,
-                        min=torch.zeros_like(w_next),
-                        max=w_next
+                    c_next_raw = w_next * policy.forward_phi(y_next_gh, w_next)
+                    positive_w_next = w_next > 0.0
+                    c_next = torch.where(
+                        positive_w_next,
+                        torch.clamp(
+                            c_next_raw,
+                            min=torch.zeros_like(w_next),
+                            max=w_next
+                        ),
+                        torch.zeros_like(w_next)
                     )
-                    u_c_next = self._utility_derivative_torch(c_next)
+                    c_next_safe = torch.clamp(c_next, min=eps)
+                    u_c_next = self._utility_derivative_torch(c_next_safe)
                     u_c_next_exp += weight * u_c_next
 
                 # Euler residuals
-                a = 1.0 - c_t / w_t
+                a = 1.0 - c_t / w_safe
                 h = 1.0 - (
                     self.model.params.beta * self.model.params.r *
                     u_c_next_exp / u_c_t
@@ -124,6 +161,8 @@ class Evaluator:
             'euler_residual_a': euler_residual_a,
             'euler_residual_h': euler_residual_h,
             'euler_residual_fb': euler_residual_fb,
+            'violation_count': violation_count,
+            'violation_samples': violation_samples,
         }
 
     def _utility_torch(self, c: torch.Tensor) -> torch.Tensor:
@@ -153,26 +192,26 @@ class Evaluator:
         """
         stats = {}
 
-        # Lifetime reward statistics
+        # Lifetime reward statistics with finite guard
         lr = metrics['lifetime_reward']
-        stats['lifetime_reward_mean'] = float(np.mean(lr))
-        stats['lifetime_reward_std'] = float(np.std(lr))
+        lr_finite = np.isfinite(lr)
+        if np.any(lr_finite):
+            stats['lifetime_reward_mean'] = float(np.mean(lr[lr_finite]))
+        else:
+            stats['lifetime_reward_mean'] = float('nan')
 
-        # Euler residual FB statistics
+        # Euler residual FB statistics with finite guard
         fb = metrics['euler_residual_fb']
         abs_fb = np.abs(fb)
-        stats['euler_fb_mean'] = float(np.mean(abs_fb))
-        stats['euler_fb_p50'] = float(np.percentile(abs_fb, 50))
-        stats['euler_fb_p90'] = float(np.percentile(abs_fb, 90))
-        stats['euler_fb_max'] = float(np.max(abs_fb))
-
-        # Euler residual magnitude
-        euler_magnitude = np.sqrt(
-            metrics['euler_residual_a'] ** 2 +
-            metrics['euler_residual_h'] ** 2
-        )
-        stats['euler_magnitude_mean'] = float(np.mean(euler_magnitude))
-        stats['euler_magnitude_p50'] = float(np.percentile(euler_magnitude, 50))
-        stats['euler_magnitude_p90'] = float(np.percentile(euler_magnitude, 90))
+        fb_finite = np.isfinite(abs_fb)
+        if abs_fb.size == 0:
+            stats['euler_fb_finite_ratio'] = 0.0
+            stats['euler_fb_mean'] = float('nan')
+        else:
+            stats['euler_fb_finite_ratio'] = float(np.mean(fb_finite))
+            if np.any(fb_finite):
+                stats['euler_fb_mean'] = float(np.mean(abs_fb[fb_finite]))
+            else:
+                stats['euler_fb_mean'] = float('nan')
 
         return stats

@@ -1,0 +1,5 @@
+2026-01-05T13:34:23.235532 | euler | 16x16 | epoch=-1 | NOTE | NaN present in series lifetime_reward_mean for size 16
+2026-01-05T13:34:23.235691 | euler | 32x32 | epoch=-1 | NOTE | NaN present in series lifetime_reward_mean for size 32
+2026-01-05T13:34:23.235777 | euler | 64x64 | epoch=-1 | NOTE | NaN present in series lifetime_reward_mean for size 64
+2026-01-05T13:39:25.764493 | bellman | 16x16 | epoch=-1 | NOTE | NaN present in series lifetime_reward_mean for size 16
+2026-01-05T13:39:25.764776 | bellman | 64x64 | epoch=-1 | NOTE | NaN present in series lifetime_reward_mean for size 64

@@ -23,8 +23,8 @@ model:
 training:
   # Objective function: 'lifetime_reward', 'euler', or 'bellman'
   objective:
-    - lifetime_reward
-    - euler
+    #- lifetime_reward
+    # - euler
     - bellman
   
   # Network architectures to train

@@ -1,0 +1,37 @@
+# Smoke test config for Section 4 evaluation pipeline
+seed: 42
+
+model:
+  gamma: 2.0
+  beta: 0.9
+  r: 1.04
+  rho: 0.0
+  sigma: 0.1
+  horizon: 10
+
+training:
+  objective:
+    - lifetime_reward
+    - euler
+    - bellman
+  network_sizes: [8]
+  num_epochs: 1
+  batch_size: 32
+  learning_rate: 0.001
+  wealth_range: [0.1, 4.0]
+  eval_interval: 1
+  nu: 1.0
+  nu_h: 1.0
+
+plotting:
+  smoothing_window: 1
+  show_raw: true
+
+debug:
+  enabled: false
+  interval: 1
+  violation_sample_limit: 5
+
+output_dir: outputs/section4
+
+device: cpu
