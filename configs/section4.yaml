@@ -1,0 +1,63 @@
+# Configuration for Section 4 Experiment
+# Consumption-Saving Problem with Deep Learning
+
+# Random seed for reproducibility
+seed: 42
+
+# Model parameters
+model:
+  # CRRA utility
+  gamma: 2.0
+  # Discount factor
+  beta: 0.9
+  # Interest rate
+  r: 1.04
+  # Income process AR(1) coefficient
+  rho: 0.0
+  # Income process standard deviation
+  sigma: 0.1
+  # Finite horizon for evaluation
+  horizon: 100
+
+# Training configuration
+training:
+  # Objective function: 'lifetime_reward', 'euler', or 'bellman'
+  objective:
+    - lifetime_reward
+    - euler
+    - bellman
+  
+  # Network architectures to train
+  # Options: [8, 16, 32, 64]
+  network_sizes: [8, 16, 32, 64]
+  
+  # Training hyperparameters
+  num_epochs: 10000 #original 30000
+  batch_size: 64
+  learning_rate: 0.001
+  
+  # Wealth sampling range [w_min, w_max]
+  wealth_range: [0.1, 4.0]
+  
+  # Evaluation interval (epochs)
+  eval_interval: 100
+  
+  # Weights for complementarity/optimality conditions
+  nu: 1.0        # Weight on FB residual
+  nu_h: 1.0      # Weight on multiplier matching
+
+# Plotting configuration
+plotting:
+  smoothing_window: 200
+  show_raw: true
+
+# Debug logging
+debug:
+  enabled: false
+  interval: 1000
+
+# Output configuration
+output_dir: outputs/section4
+
+# Device selection
+device: cpu  # 'cpu' or 'cuda'
