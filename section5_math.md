@@ -53,6 +53,11 @@ Y_t=z_t K_t^\alpha L_t^{1-\alpha},\quad
 R_t=1-d+\alpha z_t K_t^{\alpha-1}L_t^{1-\alpha},\quad
 W_t=z_t(1-\alpha)K_t^\alpha L_t^{-\alpha}.
 $$
+Note: the paper sometimes states "z_t k_t^alpha" as shorthand, but Eq. (42)
+uses aggregate labor L_t = sum_i exp(y_t^i). Do not drop L_t in code.
+z_t is the log TFP state in (41), so implementation uses exp(z_t) for levels.
+- Aggregate capital is K_t = sum_i k_t^i with k_t^i = w_{t-1}^i - c_{t-1}^i.
+  Do not substitute K_t with sum_i w_t^i.
 
 ## 1.2 Preferences and parameters
 
@@ -63,11 +68,11 @@ $$
   - capital share $\alpha$
   - depreciation $d \in (0,1)$
 - Aggregate shock:
-  - persistence $\rho_z = 0.95$
-  - volatility $\sigma_z = 0.01$
+- persistence $\rho_z = 0.95$
+- volatility $\sigma_z = 0.01$
 - Idiosyncratic shock:
-  - persistence $\rho_y = 0.9$
-  - volatility $\sigma_y = 0.2\sqrt{1-\rho_y^2}$
+- persistence $\rho_y = 0.9$
+- volatility $\sigma_y = 0.2\sqrt{1-\rho_y^2}$
 
 All remaining parameters must be configurable and documented.
 
@@ -102,16 +107,19 @@ $$
 - Nonnegative multiplier $h_t = \exp(\tilde h_t)$,
 - Value function output $V_t \in \mathbb{R}$.
 - Use the same transforms as Section 4:
-  - $c^i_t/w^i_t=\sigma(\zeta_0+\eta(\cdot))$,
-  - $h^i_t=\exp(\zeta_0+\eta(\cdot))$,
-  - $V^i_t=\zeta_0+\eta(\cdot)$.
+  - $c^i_t/w^i_t=\sigma(\zeta^{(c)}_0+\eta^{(c)}(\cdot))$,
+  - $h^i_t=\exp(\zeta^{(h)}_0+\eta^{(h)}(\cdot))$,
+  - $V^i_t=\zeta^{(V)}_0+\eta^{(V)}(\cdot)$.
+For the consumption share, $\zeta^{(c)}_0$ is **calibrated** to
+$\text{logit}(\phi^{ss})$ and kept fixed during training, matching the paper's
+"$\zeta_0$ is calibrated" statement.
 
 ---
 
 # 4. Neural Network Baseline
 
 - Activation: sigmoid
-- Architecture: $64 \times 64$
+- Architecture: $64 \times 64$ (paper setting; do not switch to smaller widths even if reference code does)
 - Initialization: He / Glorot
 - Optimizer: ADAM, learning rate $0.001$
 
@@ -184,6 +192,14 @@ with the envelope-based term $\nu_h(\cdot)$ matching Eq. (45) in the paper.
   - then $w^i_{t+1} = R_{t+1} k^i_{t+1} + W_{t+1} \exp(y^i_{t+1})$.
 - Normalize idiosyncratic productivity each period so that $\frac{1}{I}\sum_i \exp(y^i_t)=1$.
 
+Initialization (paper-compatible steady-state start):
+- training and evaluation start from steady state: $y^i_0 = 0$, $z_0 = 0$, $w^i_0 = w^{ss}$ for all agents,
+- any randomness comes from shocks, not from the initial cross-section.
+- initialize aggregate capital as $K_0 = K^{ss}\cdot L^{ss}$ with $L^{ss}=\sum_i \exp(y^i_0)$
+  (i.e., per-worker $K^{ss}$ scaled by aggregate labor).
+
+Do not introduce hard clipping of $y$ or $z$ beyond normalization; use the AR(1) transitions in logs as specified.
+
 ## 6.1.1 Section 3 (DL solution method) implementation notes
 
 - **Algorithm 1, Step 2i**: Simulate the model **on the ergodic set**; avoid fixed grids outside the region where the solution lives.
@@ -197,8 +213,20 @@ with the envelope-based term $\nu_h(\cdot)$ matching Eq. (45) in the paper.
 - Each update uses $100$ simulated points.
 - For Euler/Bellman objectives, compute $c_{t+1}$ using **next-period distribution inputs** $D_{t+1}$ (not $D_t$).
 - Use Adam with learning rate $\lambda=0.001$.
-- Bellman objective: pre-train the value function for the first $100{,}000$ iterations with consumption and multiplier fixed.
+- Bellman objective: pre-train the value function for the first $100{,}000$ **simulation periods** (or equivalently $100{,}000/\text{train\_every}$ update steps) with consumption and multiplier fixed.
 - To reduce bias from autocorrelated shocks, train on **cross-sections sufficiently separated in time** rather than consecutive periods.
+
+Main_KS reproduction mode (keep the paper model but align training schedule):
+- Train every 2 periods (TRAIN_STEP_INTERVAL=2).
+- Use batch size 10 (train_points=10).
+- Run 30,000 periods (simulation_length=30000) for training curves comparable to main_ks.
+
+Training batch coverage (to prevent constant-share collapse):
+- In each training update, replace the **focal agents’** $w^i_t$ (the sampled batch indices) with a uniform draw on
+  $[w_{\min}, w_{\max}]$ before constructing the policy inputs.
+- The distribution vector $D_t$ must reflect these replaced values for the sampled agents.
+- Use the same replacement when computing $k_{t+1}$ and the next-period inputs for the objective evaluation.
+- This replacement applies to **all objectives**, including the lifetime-reward rollout (replace $w^i_0$ for sampled agents before the rollout begins).
 
 ## 6.3 AiO expectation operator (independence requirement)
 
@@ -242,14 +270,109 @@ Plotting conventions (match paper style):
 - Use log-scale on the training-iteration axis.
 - Apply moving-average smoothing to training curves (window configurable via config).
 - Keep the same layout across objectives for comparability.
+- For lifetime_reward, plot **|objective_train|** and **scale by the ratio (train_points / reference_points)**. Our metrics store a **per-agent mean**; Fig. 10 reports a **batch total** based on a reference batch size (use **reference_points=10** to match the paper’s 80→0 scale). This is a plotting-only rescaling and does not change training.
+- For euler/bellman, plot **log-scale losses** on the y-axis (Fig. 11–12). If a sampled
+  loss is nonpositive due to finite-sample noise, clip it for plotting (do not change training).
 - Panel 2 (consumption rule): plot $c(w)$ under **7 productivity levels** spanning $[-2, +2]$ standard deviations of productivity, fixing the aggregate state and all other agents’ productivities at their **steady-state** levels.
 - Panel 3 (wealth simulation): plot wealth paths for **5 randomly selected agents** from the simulated cross-section.
+- Training-loss panel: show x-axis ticks starting at $10^0$ and include $10^2, 10^3, 10^4$ as applicable, with the max x-limit set to the total epochs.
+- Consumption-rule panel: do **not** draw the 45-degree $c=w$ line; only show the 7 curves.
+- Consumption-rule w-grid: use a **paper-comparable range** capped at $w_{\text{plot,max}}$ (default 7.0) for all objectives, even if the simulated range is larger.
+- Training-loss plotting uses the **full update history** (no truncation by smoothing).
+
+### 7.3.1 Policy definition (c vs c/w) and plotting rule
+
+Policy-output definitions must be **explicit per objective** and saved as debug metadata:
+- lifetime reward: specify whether the network outputs consumption level $c$ or share $s=c/w$.
+- euler: specify whether the network outputs consumption level $c$ or share $s=c/w$.
+- bellman: specify whether the network outputs consumption level $c$ or share $s=c/w$.
+
+The **Consumption rule** plot must always display consumption level $c(w)$ (to match Fig. 10-12):
+- if the network outputs share $s=c/w$, reconstruct $c = s \cdot w$ before plotting.
+- if the network outputs $c$, plot it directly.
+
+Optional: save share $s(w)$ as a separate plot for diagnostics, but do not mix with the main consumption rule.
+
+Rule: axis labels must match the plotted quantity (e.g., "Consumption c" if $c$ is plotted).
+
+### 7.3.2 Normalization / unnormalization contract (wealth and consumption)
+
+Every variable used in training, evaluation, saving, and plotting must be tagged as either:
+- raw (paper scale),
+- normalized (e.g., $w_\sim$).
+
+All plots and saved evaluation artifacts must use **raw scale**.
+
+Unnormalization must be explicit and recorded:
+- $w_{raw} = w_{norm} \cdot scale_w + shift_w$ (use implementation-specific values),
+- $c_{raw}$ is reconstructed in raw scale; if share is used, $c_{raw} = s \cdot w_{raw}$.
+
+Wealth simulation must **always** store and plot raw wealth, not normalized values.
+
+### 7.3.3 Figure replication conditions (steady-state fixing and y-grid)
+
+Consumption-rule evaluation must fix:
+- aggregate state (e.g., $K$, prices) at steady state,
+- other agents' states at steady state when required by the evaluation routine.
+Implementation note: use $(y^{ss}, z^{ss}) = (0, 0)$ and $w^{ss}$ computed from the steady-state prices for all non-plotted agents.
+
+Productivity grid for plots:
+- use 7 points spanning $[-2, +2]$ standard deviations (paper comparable),
+- ensure the plotted grid matches the model's internal interpretation (log productivity vs. level),
+- reflect the unit in the plot legend (e.g., sigma units or log/level).
+
+### 7.3.4 Debug artifacts for scale/definition mismatch
+
+Save under `outputs/section5/<run_id>/debug/`:
+- `policy_definition_snapshot.json`:
+  - per-objective policy output type (c or share),
+  - normalization flags, scale/shift values, and unnormalization formula.
+- `plot_inputs_snapshot.npz` (or `.json`):
+  - policy plot inputs: `w_grid_raw`, `y_grid_raw` (or internal equivalents),
+  - reconstructed `c_raw` samples.
+- `mismatch_checks.jsonl`:
+  - linearity check (e.g., curvature metric below threshold),
+  - overlap check across y (e.g., max |c_y1 - c_y2| too small),
+  - scale compression check for wealth (e.g., quantiles tightly clustered in normalized range),
+  - share-collapse check (e.g., std/ptp of $c/w$ across $w,y$ below threshold).
+
+### 7.3.5 Policy input scaling (y, w, D_t, z)
+
+To avoid a **constant-share collapse** (observed when $c/w$ is nearly constant across $y$ and $w$),
+policy inputs must be scaled explicitly and **consistently** across training, evaluation, and plotting.
+
+Required scaling (paper-aligned, steady-state units):
+- $y$ scale: $2\sigma_y / \sqrt{1-\rho_y^2}$ (so $\pm 2\sigma$ maps to about $\pm 1$).
+- $z$ scale: $2\sigma_z / \sqrt{1-\rho_z^2}$.
+- $w$ scale: steady-state cash-on-hand per worker:
+  - $R^{ss} = 1/\beta$,
+  - $K^{ss} = \left(\frac{\alpha}{R^{ss}-1+\delta}\right)^{\frac{1}{1-\alpha}}$,
+  - $W^{ss} = (1-\alpha)\,(K^{ss})^\alpha$ (with $L=1$),
+  - $w^{ss} = R^{ss} K^{ss} + W^{ss}$.
+
+Scaling rules:
+- inputs use $\tilde y = y / y_{\text{scale}}$, $\tilde z = z / z_{\text{scale}}$,
+- if the model stores productivity in **log form**, apply the scaling directly to the log state (this matches main_ks which uses $\log(y)$ and $\log(z)$),
+- $w$ uses bounds tied to steady state: $w_{\min}=0$, $w_{\max}=4w^{ss}$ and is mapped to $[-1,1]$ as
+  $$\tilde w = 2\frac{w-w_{\min}}{w_{\max}-w_{\min}}-1,$$
+- distribution vector $D_t$ must be constructed from the **scaled** $(\tilde y, \tilde w)$ for all agents.
+
+Policy output centering (paper-consistent with $\zeta_0$ intercept):
+- the share head uses $\phi=\sigma(\zeta_0+\eta)$ with $\zeta_0=\text{logit}(\phi^{ss})$,
+- $\phi^{ss} = c^{ss}/w^{ss}$ from the steady-state values above.
+
+Debug artifact (new):
+- `input_scaler_snapshot.json`:
+  - scales ($y_{\text{scale}}, z_{\text{scale}}$) and bounds ($w_{\min}, w_{\max}$),
+  - steady-state values ($R^{ss}, K^{ss}, W^{ss}, w^{ss}$),
+  - steady-state share $\phi^{ss}$ used for output-centering,
+  - whether scaling was applied in training/evaluation/plotting.
 
 Paper-matching panels:
 - Fig. 10 (lifetime reward): losses, consumption rule, wealth simulation.
 - Fig. 11 (Euler): log losses, consumption rule, wealth simulation.
 - Fig. 12 (Bellman): log losses, value function under 7 productivity levels, consumption rule, wealth simulation.
-- Fig. 13: decision-rule comparison across methods (single-agent slice), individual capital simulation, and aggregate capital simulation.
+- Fig. 13: decision-rule comparison across methods (single-agent slice with other agents fixed at steady state), individual capital simulation, and aggregate capital simulation. Use the same $w$ grid cap ($w_{\text{plot,max}}$) as in Figs. 10–12.
 
 ## 7.4 Debug logging (validation run)
 

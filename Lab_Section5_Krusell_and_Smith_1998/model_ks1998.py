@@ -127,8 +127,8 @@ class KrusellSmithModel:
         """
         Aggregate production.
         
-        Y_t = z_t * K_t^alpha * L_t^(1-alpha)
-        where L_t = sum_i exp(y_t^i)
+        Y_t = exp(z_t) * K_t^alpha * L_t^(1-alpha)
+        where L_t = sum_i exp(y_t^i) (Eq. 42).
         
         Args:
             z_t: aggregate productivity
@@ -150,8 +150,8 @@ class KrusellSmithModel:
         """
         Equilibrium factor prices.
         
-        R_t = 1 - delta + z_t * alpha * K_t^(alpha-1) * L_t^(1-alpha)
-        W_t = z_t * (1-alpha) * K_t^alpha * L_t^(-alpha)
+        R_t = 1 - delta + exp(z_t) * alpha * K_t^(alpha-1) * L_t^(1-alpha)
+        W_t = exp(z_t) * (1-alpha) * K_t^alpha * L_t^(-alpha)
         
         Args:
             z_t: aggregate productivity
@@ -276,30 +276,27 @@ class KrusellSmithModel:
         Returns:
             (w_{t+1}, y_{t+1}, z_{t+1}, K_{t+1}, prices)
         """
-        # Compute prices at current state
-        L_t = self.total_labor(y_t)
-        K_t = self.aggregate_capital(w_t, np.zeros_like(w_t))  # Current capital
-        
-        # Get consumption from policy
+        # Normalize productivity before policy evaluation.
+        y_t = self.normalize_productivity(y_t)
+
+        # Consumption decision at time t.
         c_t = policy_fn(y_t, w_t, z_t)
-        c_t = np.clip(c_t, 0, w_t)  # Enforce feasibility
-        
-        # Compute next period prices
-        L_t_normalized = self.total_labor(self.normalize_productivity(y_t))
-        z_next = self.aggregate_productivity_transition(z_t, eps_z_t)
-        
-        # Forecast prices (perfect foresight in policy rule)
-        # In practice, use current period prices or run expectations operator
-        R_t, W_t = self.factor_prices(z_t, K_t, L_t)
-        
-        # State transitions
+        c_t = np.clip(c_t, 0, w_t)
+
+        k_next = w_t - c_t
+
+        # Draw next-period shocks and update states.
         y_next = self.income_transition(y_t, eps_y_t)
         y_next = self.normalize_productivity(y_next)
-        
-        w_next = self.state_transition(w_t, c_t, y_next, R_t, W_t)
-        K_next = self.aggregate_capital(w_t, c_t)
-        
-        return w_next, y_next, z_next, K_next, (R_t, W_t)
+        z_next = self.aggregate_productivity_transition(z_t, eps_z_t)
+
+        K_next = np.sum(k_next)
+        L_next = self.total_labor(y_next)
+        R_next, W_next = self.factor_prices(z_next, K_next, L_next)
+
+        w_next = self.state_transition(w_t, c_t, y_next, R_next, W_next)
+
+        return w_next, y_next, z_next, K_next, (R_next, W_next)
     
     def compute_aggregates(
         self,

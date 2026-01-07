@@ -41,8 +41,8 @@ training:
   distribution_features: 3
 
   # Training hyperparameters
-  num_epochs: 10000 #original 300000
-  simulation_length: 10000 #original 300000
+  num_epochs: 30000 #original 300000
+  simulation_length: 30000 #original 300000
   train_every: 10
   train_points: 100
   pretrain_value_iters: 10000 #original 100000
@@ -52,6 +52,10 @@ training:
   # Evaluation
   eval_interval: 100 
   eval_horizon: 1000
+
+  # Training batch coverage for w
+  w_training_sampling:
+    enabled: true
   
   # Weights for complementarity/optimality
   nu: 1.0
@@ -61,6 +65,37 @@ training:
 plotting:
   smoothing_window: 200
   show_raw: true
+  w_plot_max: 7.0
+
+# Policy output definition by objective
+policy_output_types:
+  default: c_share
+  lifetime_reward: c_share
+  euler: c_share
+  bellman: c_share
+
+# Normalization configuration (raw scale by default)
+normalization:
+  w_normalized: false
+  w_scale: 1.0
+  w_shift: 0.0
+  c_normalized: false
+  c_scale: 1.0
+  c_shift: 0.0
+
+# Mismatch detection thresholds
+mismatch_checks:
+  curvature_threshold: 0.0001
+  overlap_threshold: 0.01
+  share_variation_threshold: 0.0001
+  wealth_range_threshold: 2.0
+  wealth_quantile_bounds: [0.5, 2.5]
+
+# Policy input scaling (steady-state units)
+input_scaling:
+  enabled: true
+  w_min: 0.0
+  w_max_multiplier: 4.0
 
 # Debug logging
 debug:

@@ -11,6 +11,7 @@ import torch
 import numpy as np
 from typing import Tuple
 from model_ks1998 import KrusellSmithModel
+from policy_utils_ks import InputScaleSpec, consumption_from_share_torch
 
 
 class KSObjectiveComputer:
@@ -84,17 +85,21 @@ class KSObjectiveComputer:
         w_t: torch.Tensor,
         z_t: torch.Tensor,
         dist_features_t: torch.Tensor,
+        w_raw_t: torch.Tensor,
         y_next_1: torch.Tensor,
         w_next_1: torch.Tensor,
         z_next_1: torch.Tensor,
         dist_features_next_1: torch.Tensor,
+        w_raw_next_1: torch.Tensor,
         y_next_2: torch.Tensor,
         w_next_2: torch.Tensor,
         z_next_2: torch.Tensor,
         dist_features_next_2: torch.Tensor,
+        w_raw_next_2: torch.Tensor,
         R_next_1: float,
         R_next_2: float,
-        nu_h: float = 1.0
+        nu_h: float = 1.0,
+        input_scale_spec: InputScaleSpec = InputScaleSpec()
     ) -> torch.Tensor:
         """
         Euler equation objective with two uncorrelated shocks.
@@ -116,24 +121,30 @@ class KSObjectiveComputer:
             scalar loss
         """
         # Current consumption and multiplier
-        c_t = policy.forward_policy(y_t, w_t, z_t, dist_features_t)
+        c_t = consumption_from_share_torch(
+            policy, y_t, w_t, z_t, dist_features_t, w_raw_t
+        )
         h_t = policy.forward_h(y_t, w_t, z_t, dist_features_t)
         
         # Marginal utility at c_t
         u_c_t = c_t**(-self.model.params.gamma)
         
-        c_next_1 = policy.forward_policy(
-            y_next_1, w_next_1, z_next_1, dist_features_next_1
+        c_next_1 = consumption_from_share_torch(
+            policy,
+            y_next_1, w_next_1, z_next_1, dist_features_next_1,
+            w_raw_next_1
         )
         u_c_next_1 = c_next_1**(-self.model.params.gamma)
         
-        c_next_2 = policy.forward_policy(
-            y_next_2, w_next_2, z_next_2, dist_features_next_2
+        c_next_2 = consumption_from_share_torch(
+            policy,
+            y_next_2, w_next_2, z_next_2, dist_features_next_2,
+            w_raw_next_2
         )
         u_c_next_2 = c_next_2**(-self.model.params.gamma)
         
         # Fischer-Burmeister residual
-        a = 1.0 - c_t / w_t
+        a = 1.0 - c_t / w_raw_t
         fb_residual = a + (1.0 - h_t) - torch.sqrt(
             a**2 + (1.0 - h_t)**2 + 1e-12
         )
@@ -162,16 +173,20 @@ class KSObjectiveComputer:
         w_t: torch.Tensor,
         z_t: torch.Tensor,
         dist_features_t: torch.Tensor,
+        w_raw_t: torch.Tensor,
         y_next_1: torch.Tensor,
         w_next_1: torch.Tensor,
         z_next_1: torch.Tensor,
         dist_features_next_1: torch.Tensor,
+        w_raw_next_1: torch.Tensor,
         y_next_2: torch.Tensor,
         w_next_2: torch.Tensor,
         z_next_2: torch.Tensor,
         dist_features_next_2: torch.Tensor,
+        w_raw_next_2: torch.Tensor,
         nu_h: float = 1.0,
-        nu: float = 1.0
+        nu: float = 1.0,
+        input_scale_spec: InputScaleSpec = InputScaleSpec()
     ) -> torch.Tensor:
         """
         Bellman equation objective with two uncorrelated shocks.
@@ -185,9 +200,10 @@ class KSObjectiveComputer:
             scalar loss
         """
         # Current state outputs
-        c_t, phi_t, h_t, V_t = policy.forward_all(
-            y_t, w_t, z_t, dist_features_t
-        )
+        phi_t = policy.forward_phi(y_t, w_t, z_t, dist_features_t)
+        h_t = policy.forward_h(y_t, w_t, z_t, dist_features_t)
+        V_t = policy.forward_v(y_t, w_t, z_t, dist_features_t)
+        c_t = phi_t * w_raw_t
         
         # Utility at current consumption
         gamma = self.model.params.gamma
@@ -202,8 +218,10 @@ class KSObjectiveComputer:
         V_next_1 = policy.forward_v(
             y_next_1, w_next_1, z_next_1, dist_features_next_1
         )
-        c_next_1 = policy.forward_policy(
-            y_next_1, w_next_1, z_next_1, dist_features_next_1
+        c_next_1 = consumption_from_share_torch(
+            policy,
+            y_next_1, w_next_1, z_next_1, dist_features_next_1,
+            w_raw_next_1
         )
         u_c_next_1 = c_next_1**(-gamma)
         
@@ -211,8 +229,10 @@ class KSObjectiveComputer:
         V_next_2 = policy.forward_v(
             y_next_2, w_next_2, z_next_2, dist_features_next_2
         )
-        c_next_2 = policy.forward_policy(
-            y_next_2, w_next_2, z_next_2, dist_features_next_2
+        c_next_2 = consumption_from_share_torch(
+            policy,
+            y_next_2, w_next_2, z_next_2, dist_features_next_2,
+            w_raw_next_2
         )
         u_c_next_2 = c_next_2**(-gamma)
         
@@ -223,7 +243,7 @@ class KSObjectiveComputer:
         loss_bellman = torch.mean(bellman_1 * bellman_2)
         
         # FB residual
-        a = 1.0 - c_t / w_t
+        a = 1.0 - c_t / w_raw_t
         fb_residual = a + (1.0 - h_t) - torch.sqrt(
             a**2 + (1.0 - h_t)**2 + 1e-12
         )
@@ -232,10 +252,16 @@ class KSObjectiveComputer:
         
         # Value derivative matching (finite differences)
         dV_dw_1 = self._value_derivative_w(
-            policy, y_next_1, w_next_1, z_next_1, dist_features_next_1
+            policy,
+            y_next_1, w_next_1, z_next_1, dist_features_next_1,
+            w_range=(input_scale_spec.w_max - input_scale_spec.w_min)
+            if input_scale_spec.enabled else 1.0
         )
         dV_dw_2 = self._value_derivative_w(
-            policy, y_next_2, w_next_2, z_next_2, dist_features_next_2
+            policy,
+            y_next_2, w_next_2, z_next_2, dist_features_next_2,
+            w_range=(input_scale_spec.w_max - input_scale_spec.w_min)
+            if input_scale_spec.enabled else 1.0
         )
         
         mult_1 = (self.model.params.beta * dV_dw_1 / u_c_t - h_t)
@@ -254,11 +280,14 @@ class KSObjectiveComputer:
         w: torch.Tensor,
         z: torch.Tensor,
         dist_features: torch.Tensor,
-        h_value: float = 1e-4
+        h_value: float = 1e-4,
+        w_range: float = 1.0
     ) -> torch.Tensor:
         """Approximate dV/dw using finite differences."""
-        w_plus = w + h_value
-        w_minus = w - h_value
+        w_range = w_range if abs(w_range) > 1e-12 else 1.0
+        h_scaled = h_value * 2.0 / w_range
+        w_plus = w + h_scaled
+        w_minus = w - h_scaled
         
         V_plus = policy.forward_v(y, w_plus, z, dist_features)
         V_minus = policy.forward_v(y, w_minus, z, dist_features)

@@ -9,6 +9,13 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Tuple
 from model_ks1998 import KrusellSmithModel
+from policy_utils_ks import (
+    PolicyOutputType,
+    InputScaleSpec,
+    scale_inputs_numpy,
+    consumption_from_share_torch,
+    build_dist_features_numpy
+)
 
 
 class KSEvaluator:
@@ -17,7 +24,9 @@ class KSEvaluator:
     def __init__(
         self,
         model: KrusellSmithModel,
-        device: str = 'cpu'
+        device: str = 'cpu',
+        input_scale_spec: InputScaleSpec = InputScaleSpec(),
+        policy_output_type: str = PolicyOutputType.C_SHARE
     ):
         """
         Initialize evaluator.
@@ -28,6 +37,8 @@ class KSEvaluator:
         """
         self.model = model
         self.device = device
+        self.input_scale_spec = input_scale_spec
+        self.policy_output_type = policy_output_type
 
     def evaluate_simulation(
         self,
@@ -82,15 +93,21 @@ class KSEvaluator:
                 # Normalize productivity
                 y_t = self.model.normalize_productivity(y_t)
                 
-                # Distribution vector
-                dist_vec = np.concatenate([y_t, w_t], axis=0)
+                # Scaled inputs for policy
+                y_scaled, w_scaled, z_scaled = scale_inputs_numpy(
+                    y_t, w_t, z_t, self.input_scale_spec
+                )
+
+                # Distribution vector (scaled)
+                dist_vec = build_dist_features_numpy(y_scaled, w_scaled)
                 
                 # Convert to tensors
-                y_tensor = torch.from_numpy(y_t).float().to(self.device)
-                w_tensor = torch.from_numpy(w_t).float().to(self.device)
-                z_tensor = torch.full((num_agents,), z_t,
+                y_tensor = torch.from_numpy(y_scaled).float().to(self.device)
+                w_tensor = torch.from_numpy(w_scaled).float().to(self.device)
+                z_tensor = torch.full((num_agents,), z_scaled,
                                      dtype=torch.float32,
                                      device=self.device)
+                w_raw_tensor = torch.from_numpy(w_t).float().to(self.device)
                 dist_tensor = torch.from_numpy(
                     dist_vec
                 ).float().to(self.device).unsqueeze(0).expand(
@@ -98,9 +115,18 @@ class KSEvaluator:
                 )
                 
                 # Get consumption
-                c_t = policy.forward_policy(y_tensor, w_tensor,
-                                           z_tensor, dist_tensor)
-                c_t = torch.clamp(c_t, min=torch.zeros_like(w_tensor), max=w_tensor)
+                if self.policy_output_type != PolicyOutputType.C_SHARE:
+                    raise ValueError(
+                        "Only c_share policy output is supported with input scaling."
+                    )
+                c_t = consumption_from_share_torch(
+                    policy, y_tensor, w_tensor, z_tensor, dist_tensor, w_raw_tensor
+                )
+                c_t = torch.clamp(
+                    c_t,
+                    min=torch.zeros_like(w_raw_tensor),
+                    max=w_raw_tensor
+                )
                 c_t_np = c_t.cpu().numpy()
                 k_next = w_t - c_t_np
                 
