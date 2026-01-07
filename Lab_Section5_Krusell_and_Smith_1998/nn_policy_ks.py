@@ -57,7 +57,7 @@ class KSNeuralNetworkPolicy(nn.Module):
         self.fc2 = nn.Linear(hidden_size, hidden_size)
         
         # Output heads
-        self.phi_intercept = nn.Parameter(torch.zeros(1))
+        self.phi_intercept = nn.Parameter(torch.zeros(1), requires_grad=False)
         self.phi_output = nn.Linear(hidden_size, 1)
         
         self.h_intercept = nn.Parameter(torch.zeros(1))
