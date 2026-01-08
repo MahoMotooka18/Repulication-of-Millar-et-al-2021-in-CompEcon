@@ -94,7 +94,6 @@ class KSPlotter:
                 epochs = np.arange(1, len(losses) + 1)
                 x_label = 'Update'
             if objective_name == 'lifetime_reward':
-                losses = np.abs(losses)
                 if ('train_points' in metrics_df.columns
                         and loss_scale_ref_points):
                     losses = (
