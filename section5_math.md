@@ -270,7 +270,7 @@ Plotting conventions (match paper style):
 - Use log-scale on the training-iteration axis.
 - Apply moving-average smoothing to training curves (window configurable via config).
 - Keep the same layout across objectives for comparability.
-- For lifetime_reward, plot **|objective_train|** and **scale by the ratio (train_points / reference_points)**. Our metrics store a **per-agent mean**; Fig. 10 reports a **batch total** based on a reference batch size (use **reference_points=10** to match the paper’s 80→0 scale). This is a plotting-only rescaling and does not change training.
+- For lifetime_reward, plot **objective_train** (keep its sign) and **scale by the ratio (train_points / reference_points)**. Our metrics store a **per-agent mean**; Fig. 10 reports a **batch total** based on a reference batch size (use **reference_points=10** to match the paper’s 80→0 scale). Do **not** take absolute value: when log utility is positive, the loss is negative and becomes more negative as training improves, and `abs()` would flip the direction. This is a plotting-only rescaling and does not change training.
 - For euler/bellman, plot **log-scale losses** on the y-axis (Fig. 11–12). If a sampled
   loss is nonpositive due to finite-sample noise, clip it for plotting (do not change training).
 - Panel 2 (consumption rule): plot $c(w)$ under **7 productivity levels** spanning $[-2, +2]$ standard deviations of productivity, fixing the aggregate state and all other agents’ productivities at their **steady-state** levels.
