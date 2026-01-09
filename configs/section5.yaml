@@ -105,5 +105,9 @@ debug:
 # Output configuration
 output_dir: outputs/section5
 
+# Cross-objective comparison (Section 5.6)
+comparison:
+  agent_count: max
+
 # Device
 device: cpu

@@ -998,22 +998,37 @@ class KSExperimentRunnerComplete:
             print("Insufficient objectives for comparison")
             return
 
-        # Get simulations for smallest agent count
-        min_agents = min(
-            min(sims.keys())
-            for sims in self.all_simulations.values()
-        )
+        comparison_cfg = self.config.get('comparison', {})
+        requested_agents = comparison_cfg.get('agent_count', None)
+        available_counts = sorted({
+            count for sims in self.all_simulations.values() for count in sims.keys()
+        })
+        if not available_counts:
+            print("No simulations available for comparison")
+            return
+        if requested_agents is None or requested_agents == 'max':
+            comparison_agents = available_counts[-1]
+        elif requested_agents == 'min':
+            comparison_agents = available_counts[0]
+        else:
+            comparison_agents = int(requested_agents)
+            if comparison_agents not in available_counts:
+                print(
+                    f"Requested comparison agent count {comparison_agents} not found; "
+                    f"falling back to max={available_counts[-1]}"
+                )
+                comparison_agents = available_counts[-1]
 
         comparison_policies = {
-            obj: policies[min_agents]
+            obj: policies[comparison_agents]
             for obj, policies in self.all_policies.items()
-            if min_agents in policies
+            if comparison_agents in policies
         }
 
         comparison_sims = {
-            obj: sims[min_agents]
+            obj: sims[comparison_agents]
             for obj, sims in self.all_simulations.items()
-            if min_agents in sims
+            if comparison_agents in sims
         }
 
         if not comparison_policies:
