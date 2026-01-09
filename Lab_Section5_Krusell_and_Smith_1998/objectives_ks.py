@@ -121,8 +121,9 @@ class KSObjectiveComputer:
             scalar loss
         """
         # Current consumption and multiplier
+        w_cap = float(input_scale_spec.w_max) if input_scale_spec.enabled else None
         c_t = consumption_from_share_torch(
-            policy, y_t, w_t, z_t, dist_features_t, w_raw_t
+            policy, y_t, w_t, z_t, dist_features_t, w_raw_t, w_cap=w_cap
         )
         h_t = policy.forward_h(y_t, w_t, z_t, dist_features_t)
         
@@ -132,21 +133,24 @@ class KSObjectiveComputer:
         c_next_1 = consumption_from_share_torch(
             policy,
             y_next_1, w_next_1, z_next_1, dist_features_next_1,
-            w_raw_next_1
+            w_raw_next_1,
+            w_cap=w_cap
         )
         u_c_next_1 = c_next_1**(-self.model.params.gamma)
         
         c_next_2 = consumption_from_share_torch(
             policy,
             y_next_2, w_next_2, z_next_2, dist_features_next_2,
-            w_raw_next_2
+            w_raw_next_2,
+            w_cap=w_cap
         )
         u_c_next_2 = c_next_2**(-self.model.params.gamma)
         
-        # Fischer-Burmeister residual
-        a = 1.0 - c_t / w_raw_t
-        fb_residual = a + (1.0 - h_t) - torch.sqrt(
-            a**2 + (1.0 - h_t)**2 + 1e-12
+        # Fischer-Burmeister residual (MMV Eq. 25)
+        r_mu = h_t - 1.0
+        r_xi = w_raw_t / (c_t + 1e-12) - 1.0
+        fb_residual = r_mu + r_xi - torch.sqrt(
+            r_mu**2 + r_xi**2 + 1e-12
         )
         
         # Euler expectation terms
@@ -203,7 +207,15 @@ class KSObjectiveComputer:
         phi_t = policy.forward_phi(y_t, w_t, z_t, dist_features_t)
         h_t = policy.forward_h(y_t, w_t, z_t, dist_features_t)
         V_t = policy.forward_v(y_t, w_t, z_t, dist_features_t)
-        c_t = phi_t * w_raw_t
+        w_cap = float(input_scale_spec.w_max) if input_scale_spec.enabled else None
+        if w_cap is None:
+            c_t = phi_t * w_raw_t
+        else:
+            k_next = torch.minimum(
+                w_raw_t * (1.0 - phi_t),
+                w_raw_t.new_full((), float(w_cap))
+            )
+            c_t = w_raw_t - k_next
         
         # Utility at current consumption
         gamma = self.model.params.gamma
@@ -221,7 +233,8 @@ class KSObjectiveComputer:
         c_next_1 = consumption_from_share_torch(
             policy,
             y_next_1, w_next_1, z_next_1, dist_features_next_1,
-            w_raw_next_1
+            w_raw_next_1,
+            w_cap=w_cap
         )
         u_c_next_1 = c_next_1**(-gamma)
         
@@ -232,7 +245,8 @@ class KSObjectiveComputer:
         c_next_2 = consumption_from_share_torch(
             policy,
             y_next_2, w_next_2, z_next_2, dist_features_next_2,
-            w_raw_next_2
+            w_raw_next_2,
+            w_cap=w_cap
         )
         u_c_next_2 = c_next_2**(-gamma)
         
@@ -242,10 +256,11 @@ class KSObjectiveComputer:
         
         loss_bellman = torch.mean(bellman_1 * bellman_2)
         
-        # FB residual
-        a = 1.0 - c_t / w_raw_t
-        fb_residual = a + (1.0 - h_t) - torch.sqrt(
-            a**2 + (1.0 - h_t)**2 + 1e-12
+        # FB residual (MMV Eq. 25)
+        r_mu = h_t - 1.0
+        r_xi = w_raw_t / (c_t + 1e-12) - 1.0
+        fb_residual = r_mu + r_xi - torch.sqrt(
+            r_mu**2 + r_xi**2 + 1e-12
         )
         
         loss_fb = torch.mean(fb_residual**2)

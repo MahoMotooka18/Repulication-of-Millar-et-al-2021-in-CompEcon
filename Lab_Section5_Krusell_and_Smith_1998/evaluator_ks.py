@@ -119,8 +119,18 @@ class KSEvaluator:
                     raise ValueError(
                         "Only c_share policy output is supported with input scaling."
                     )
+                w_cap = (
+                    float(self.input_scale_spec.w_max)
+                    if self.input_scale_spec.enabled else None
+                )
                 c_t = consumption_from_share_torch(
-                    policy, y_tensor, w_tensor, z_tensor, dist_tensor, w_raw_tensor
+                    policy,
+                    y_tensor,
+                    w_tensor,
+                    z_tensor,
+                    dist_tensor,
+                    w_raw_tensor,
+                    w_cap=w_cap
                 )
                 c_t = torch.clamp(
                     c_t,

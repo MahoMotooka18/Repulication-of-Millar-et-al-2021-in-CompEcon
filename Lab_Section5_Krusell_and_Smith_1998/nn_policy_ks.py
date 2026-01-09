@@ -30,7 +30,8 @@ class KSNeuralNetworkPolicy(nn.Module):
         self,
         distribution_features: int,
         hidden_size: int = 64,
-        init_intercept_zero: bool = True
+        init_intercept_zero: bool = True,
+        phi_steady: float | None = None
     ):
     
         """
@@ -58,6 +59,11 @@ class KSNeuralNetworkPolicy(nn.Module):
         
         # Output heads
         self.phi_intercept = nn.Parameter(torch.zeros(1), requires_grad=False)
+        phi_shift = 0.0 if phi_steady is None else self._logit(phi_steady)
+        self.register_buffer(
+            "phi_logit_shift",
+            torch.tensor(phi_shift, dtype=torch.float32)
+        )
         self.phi_output = nn.Linear(hidden_size, 1)
         
         self.h_intercept = nn.Parameter(torch.zeros(1))
@@ -84,6 +90,12 @@ class KSNeuralNetworkPolicy(nn.Module):
             nn.init.zeros_(self.phi_intercept)
             nn.init.zeros_(self.h_intercept)
             nn.init.zeros_(self.v_intercept)
+
+    @staticmethod
+    def _logit(prob: float) -> float:
+        """Stable logit for probability inputs."""
+        p = min(max(prob, 1e-6), 1.0 - 1e-6)
+        return float(np.log(p / (1.0 - p)))
     
     def forward_shared(
         self,
@@ -123,7 +135,11 @@ class KSNeuralNetworkPolicy(nn.Module):
         phi = sigmoid(zeta_0 + eta(...))
         """
         eta = self.forward_shared(y, w, z, dist_features)
-        logit = self.phi_intercept + self.phi_output(eta).squeeze(-1)
+        logit = (
+            self.phi_intercept
+            + self.phi_logit_shift
+            + self.phi_output(eta).squeeze(-1)
+        )
         return torch.sigmoid(logit)
     
     def forward_h(
@@ -207,7 +223,8 @@ class KSPolicyFactory:
     def create_policy(
         hidden_size: int = 64,
         num_agents: int = 1000,
-        device: str = 'cpu'
+        device: str = 'cpu',
+        phi_steady: float | None = None
     ) -> KSNeuralNetworkPolicy:
         """
         Create a KS policy network.
@@ -223,6 +240,7 @@ class KSPolicyFactory:
         policy = KSNeuralNetworkPolicy(
             hidden_size=hidden_size,
             distribution_features=2 * num_agents,
-            init_intercept_zero=True
+            init_intercept_zero=True,
+            phi_steady=phi_steady
         )
         return policy.to(device)
