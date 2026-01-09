@@ -102,11 +102,15 @@ def consumption_from_share_torch(
     w_scaled: torch.Tensor,
     z_scaled: torch.Tensor,
     dist_scaled: torch.Tensor,
-    w_raw: torch.Tensor
+    w_raw: torch.Tensor,
+    w_cap: float | None = None
 ) -> torch.Tensor:
     """Compute raw consumption from share using scaled inputs."""
     share = policy.forward_phi(y_scaled, w_scaled, z_scaled, dist_scaled)
-    return share * w_raw
+    if w_cap is None:
+        return share * w_raw
+    k_next = torch.minimum(w_raw * (1.0 - share), w_raw.new_full((), float(w_cap)))
+    return w_raw - k_next
 
 
 def normalize_w(w_raw: np.ndarray, spec: NormalizationSpec) -> np.ndarray:

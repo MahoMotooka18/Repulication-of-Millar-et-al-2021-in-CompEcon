@@ -149,7 +149,9 @@ class KSExperimentRunnerComplete:
             rho_z=self.config['model']['rho_z'],
             sigma_z=self.config['model']['sigma_z'],
             num_agents=self.config['model']['num_agents'],
-            horizon=self.config['model']['horizon']
+            horizon=self.config['model']['horizon'],
+            enforce_bounds=bool(self.config['model'].get('enforce_bounds', True)),
+            use_log_shock_shift=bool(self.config['model'].get('use_log_shock_shift', True))
         )
         self.model = KrusellSmithModel(params)
         self.objective_computer = KSObjectiveComputer(
@@ -337,7 +339,8 @@ class KSExperimentRunnerComplete:
         policy = KSPolicyFactory.create_policy(
             hidden_size=self.config['training']['hidden_size'],
             num_agents=num_agents,
-            device=self.device
+            device=self.device,
+            phi_steady=float(self.input_scale_snapshot.get('phi_steady', 0.5))
         ).train()
         policy_output_type = self.policy_output_types.get(
             objective_name, PolicyOutputType.C_SHARE
@@ -420,8 +423,18 @@ class KSExperimentRunnerComplete:
             )
 
             with torch.no_grad():
+                w_cap = (
+                    float(self.input_scale_spec.w_max)
+                    if self.input_scale_spec.enabled else None
+                )
                 c_t = consumption_from_share_torch(
-                    policy, y_tensor, w_tensor, z_tensor, dist_tensor, w_raw_tensor
+                    policy,
+                    y_tensor,
+                    w_tensor,
+                    z_tensor,
+                    dist_tensor,
+                    w_raw_tensor,
+                    w_cap=w_cap
                 )
                 c_t = torch.clamp(
                     c_t,
@@ -518,13 +531,18 @@ class KSExperimentRunnerComplete:
 
                 # Recompute next states for training batch using augmented w
                 with torch.no_grad():
+                    w_cap = (
+                        float(self.input_scale_spec.w_max)
+                        if self.input_scale_spec.enabled else None
+                    )
                     c_train_all = consumption_from_share_torch(
                         policy,
                         y_train_tensor,
                         w_train_tensor,
                         z_train_tensor,
                         dist_train_tensor,
-                        w_train_raw_tensor
+                        w_train_raw_tensor,
+                        w_cap=w_cap
                     )
                 c_train_np = c_train_all.cpu().numpy()
                 k_next_full = w_train_use - c_train_np
@@ -798,8 +816,16 @@ class KSExperimentRunnerComplete:
 
     def _normalize_productivity_torch(self, y: torch.Tensor) -> torch.Tensor:
         """Normalize productivity so mean exp(y)=1 (torch version)."""
-        mean_exp = torch.mean(torch.exp(y))
-        return y - torch.log(mean_exp + 1e-12)
+        y_use = y
+        if self.model.params.enforce_bounds:
+            y_min, y_max = self.model._y_log_bounds
+            y_use = torch.clamp(
+                y_use,
+                min=float(y_min),
+                max=float(y_max)
+            )
+        mean_exp = torch.mean(torch.exp(y_use))
+        return y_use - torch.log(mean_exp + 1e-12)
 
     def _train_step_lifetime_reward(
         self,
@@ -852,8 +878,12 @@ class KSExperimentRunnerComplete:
                 (num_agents,), z_scaled_value, dtype=torch.float32, device=self.device
             )
 
+            w_cap = (
+                float(input_scale_spec.w_max)
+                if input_scale_spec.enabled else None
+            )
             c_all = consumption_from_share_torch(
-                policy, y_scaled, w_scaled, z_tensor, dist_tensor, w_t
+                policy, y_scaled, w_scaled, z_tensor, dist_tensor, w_t, w_cap=w_cap
             )
             c_all = torch.clamp(
                 c_all, min=torch.zeros_like(w_t), max=w_t
@@ -875,9 +905,18 @@ class KSExperimentRunnerComplete:
                 device=self.device
             )
 
-            y_next = rho_y * y_t + sigma_y * eps_y
+            y_shift = self.model._y_log_shift if self.model.params.use_log_shock_shift else 0.0
+            y_next = rho_y * y_t + sigma_y * eps_y + y_shift
             y_next = self._normalize_productivity_torch(y_next)
-            z_next = rho_z * z_t + sigma_z * eps_z
+            z_shift = self.model._z_log_shift if self.model.params.use_log_shock_shift else 0.0
+            z_next = rho_z * z_t + sigma_z * eps_z + z_shift
+            if self.model.params.enforce_bounds:
+                z_min, z_max = self.model._z_log_bounds
+                z_next = torch.clamp(
+                    z_next,
+                    min=float(z_min),
+                    max=float(z_max)
+                )
 
             K_next = torch.sum(k_next)
             L_next = torch.sum(torch.exp(y_next))

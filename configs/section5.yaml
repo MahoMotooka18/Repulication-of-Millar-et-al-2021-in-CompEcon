@@ -14,12 +14,16 @@ model:
   delta: 0.08         # Depreciation rate
   
   # Idiosyncratic process
-  rho_y: 0.9
-  sigma_y: 0.0871779789 #0.2 * sqrt(1 - 0.9**2)  # Adjusted volatility
+  rho_y: 0.95 #original 0.9
+  sigma_y: 0.2 #0.062448 # original 0.2 * sqrt(1 - 0.9**2) = 0.0871779789 # Adjusted volatility
   
   # Aggregate process
-  rho_z: 0.95
+  rho_z: 0.9 #original 0.95
   sigma_z: 0.01
+
+  # Main_KS.ipynb alignment
+  enforce_bounds: true
+  use_log_shock_shift: true
   
   # Default agent count (will be overridden in grid)
   num_agents: 1000
@@ -29,7 +33,7 @@ model:
 training:
   # Objectives to train: lifetime_reward, euler, bellman
   objectives:
-    - lifetime_reward
+    #- lifetime_reward
     - euler
     - bellman
   
@@ -43,8 +47,8 @@ training:
   # Training hyperparameters
   num_epochs: 30000 #original 300000
   simulation_length: 30000 #original 300000
-  train_every: 10
-  train_points: 100
+  train_every: 2 #original 10
+  train_points: 100 #original 100
   pretrain_value_iters: 10000 #original 100000
   learning_rate: 0.001
   batch_size: 64
@@ -100,7 +104,7 @@ input_scaling:
 # Debug logging
 debug:
   enabled: false
-  interval: 1000
+  interval: 100 #original 1000
 
 # Output configuration
 output_dir: outputs/section5

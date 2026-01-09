@@ -39,6 +39,10 @@ class KrusellSmithParams:
     
     # Simulation
     horizon: int = 100
+
+    # Replication switches (Main_KS.ipynb alignment)
+    enforce_bounds: bool = True
+    use_log_shock_shift: bool = True
     
     def __post_init__(self):
         """Validate parameters."""
@@ -64,6 +68,31 @@ class KrusellSmithModel:
     def __init__(self, params: KrusellSmithParams):
         """Initialize the model."""
         self.params = params
+        self._y_log_bounds = self._log_bounds(
+            self.params.sigma_y, self.params.rho_y
+        )
+        self._z_log_bounds = self._log_bounds(
+            self.params.sigma_z, self.params.rho_z
+        )
+        self._y_log_shift = self._log_shock_mean_shift(
+            self.params.sigma_y, self.params.rho_y
+        )
+        self._z_log_shift = self._log_shock_mean_shift(
+            self.params.sigma_z, self.params.rho_z
+        )
+
+    @staticmethod
+    def _log_bounds(sigma: float, rho: float) -> Tuple[float, float]:
+        """Bounds for log shocks at +/- 2 std devs of stationary dist."""
+        denom = max(1e-12, np.sqrt(1.0 - rho**2))
+        bound = 2.0 * sigma / denom
+        return -bound, bound
+
+    @staticmethod
+    def _log_shock_mean_shift(sigma: float, rho: float) -> float:
+        """Mean shift so E[exp(log shock)] is near 1 in steady state."""
+        denom = max(1e-12, 1.0 - rho**2)
+        return (-0.5 * (1.0 - rho) * sigma**2) / denom
     
     def utility(self, c: np.ndarray) -> np.ndarray:
         """
@@ -101,7 +130,8 @@ class KrusellSmithModel:
         Returns:
             y_{t+1}: next productivity (num_agents,)
         """
-        return self.params.rho_y * y_t + self.params.sigma_y * eps_t
+        shift = self._y_log_shift if self.params.use_log_shock_shift else 0.0
+        return self.params.rho_y * y_t + self.params.sigma_y * eps_t + shift
     
     def aggregate_productivity_transition(
         self,
@@ -120,7 +150,12 @@ class KrusellSmithModel:
         Returns:
             z_{t+1}: next log TFP
         """
-        return self.params.rho_z * z_t + self.params.sigma_z * eps_z_t
+        shift = self._z_log_shift if self.params.use_log_shock_shift else 0.0
+        z_next = self.params.rho_z * z_t + self.params.sigma_z * eps_z_t + shift
+        if self.params.enforce_bounds:
+            z_min, z_max = self._z_log_bounds
+            z_next = float(np.clip(z_next, z_min, z_max))
+        return z_next
     
     def production_output(self, z_t: float, K_t: float,
                           total_labor: float) -> float:
@@ -248,8 +283,12 @@ class KrusellSmithModel:
         Returns:
             normalized y
         """
-        mean_exp = np.mean(np.exp(y))
-        return y - np.log(mean_exp)
+        y_use = y
+        if self.params.enforce_bounds:
+            y_min, y_max = self._y_log_bounds
+            y_use = np.clip(y_use, y_min, y_max)
+        mean_exp = np.mean(np.exp(y_use))
+        return y_use - np.log(mean_exp)
     
     def simulate_period(
         self,

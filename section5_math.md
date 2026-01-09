@@ -408,3 +408,12 @@ python Lab_Section5_Krusell_and_Smith_1998/train_ks_experiment.py --config confi
 
 Config parsing note:
 - YAML does not evaluate arithmetic; if values like `0.2 * sqrt(1 - 0.9**2)` are used, they must be safely evaluated to floats during config load.
+
+---
+
+# 10. Replication Change Log
+
+- Aligned the Fischer-Burmeister residual with the reference Euler code (`references/Main_KS.ipynb`, cell 37) by using `R_mu = mu - 1` and `R_xi = w/c - 1` in `Lab_Section5_Krusell_and_Smith_1998/objectives_ks.py`.
+- Added a steady-state logit shift for the consumption share (`references/Main_KS.ipynb`, cell 32) in `Lab_Section5_Krusell_and_Smith_1998/nn_policy_ks.py`, and pass `phi_steady` from the input-scale snapshot in `Lab_Section5_Krusell_and_Smith_1998/train_ks_experiment.py`.
+- Applied the reference cap on next-period capital (`k' <= w_max`) by reconstructing consumption as `c = w - min(w*(1-phi), w_max)` in `Lab_Section5_Krusell_and_Smith_1998/policy_utils_ks.py`, and threaded `w_max` through training, evaluation, and objectives.
+- Added log-shock mean shifts and +/-2-sigma log bounds for idiosyncratic and aggregate productivity to match `references/Main_KS.ipynb` (`y_min/y_max`, `z_min/z_max`), updating `Lab_Section5_Krusell_and_Smith_1998/model_ks1998.py` and the torch rollout path in `Lab_Section5_Krusell_and_Smith_1998/train_ks_experiment.py` (config keys: `model.enforce_bounds`, `model.use_log_shock_shift`).
