@@ -14,11 +14,11 @@ model:
   delta: 0.08         # Depreciation rate
   
   # Idiosyncratic process
-  rho_y: 0.95 #original 0.9
-  sigma_y: 0.2 #0.062448 # original 0.2 * sqrt(1 - 0.9**2) = 0.0871779789 # Adjusted volatility
+  rho_y: 0.9 #original 0.9
+  sigma_y:  0.0871779789  # original 0.2 * sqrt(1 - 0.9**2) = 0.0871779789 # Adjusted volatility
   
   # Aggregate process
-  rho_z: 0.9 #original 0.95
+  rho_z: 0.95 #original 0.95
   sigma_z: 0.01
 
   # Main_KS.ipynb alignment
@@ -33,7 +33,7 @@ model:
 training:
   # Objectives to train: lifetime_reward, euler, bellman
   objectives:
-    #- lifetime_reward
+    - lifetime_reward
     - euler
     - bellman
   
