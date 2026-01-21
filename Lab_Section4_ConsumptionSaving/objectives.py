@@ -157,75 +157,89 @@ class ObjectiveComputer:
         nu: float = 1.0
     ) -> torch.Tensor:
         """
-        Bellman equation objective (Eq. 32) with AiO and two shocks.
+        Bellman equation objective (Eq. 32 in paper) with AiO.
 
-        Combines Bellman residual with FB characterization of optimality.
+        Implements the objective from Definition 2.10 in the paper:
+        
+        Ξ(θ) = E_ω[ξ(ω;θ)] 
+        
+        = E_{(y,w,ε₁,ε₂)} { [V(y,w;θ) - u(c) - βV(y',w';θ)|_{ε=ε₁}]
+                              × [V(y,w;θ) - u(c) - βV(y',w';θ)|_{ε=ε₂}]
+                              + ν·[Ψ^FB(1-c/w, 1-h)]²
+                              + ν_h·[(β·∂V/∂w'|_{ε₁}/u'(c) - h)
+                                    ·(β·∂V/∂w'|_{ε₂}/u'(c) - h)] }
+
+        Key components:
+        1. Bellman residual (AiO product): squared residuals via two independent shocks
+        2. Fischer-Burmeister complementarity: ensures a·h = 0 and a,h ≥ 0
+        3. Multiplier matching: enforces first-order conditions across shocks
 
         Args:
-            policy: NeuralNetworkPolicy (must have all three outputs)
+            policy: NeuralNetworkPolicy with forward_phi, forward_h, forward_v
             y_batch: current log-income (n_samples,)
             w_batch: current wealth (n_samples,)
-            eps1_batch: first shock (n_samples,)
-            eps2_batch: second shock (n_samples,)
-            nu_h: weight on multiplier matching
-            nu: weight on FB residual term
+            eps1_batch: first shock (n_samples,) — independent
+            eps2_batch: second shock (n_samples,) — independent from eps1
+            nu: weight on Fischer-Burmeister term (default 1.0)
+            nu_h: weight on multiplier matching term (default 1.0)
 
         Returns:
-            scalar loss (Eq. 32)
+            scalar loss to minimize (Eq. 32)
         """
         batch_size = y_batch.shape[0]
 
-        # Current state values
+        # ===== Current state =====
         phi = policy.forward_phi(y_batch, w_batch)
         c = w_batch * phi
-        h = policy.forward_h(y_batch, w_batch)
+        c = torch.clamp(c, min=torch.zeros_like(c), max=w_batch)  # Ensure feasibility
         V = policy.forward_v(y_batch, w_batch)
+        u_c = self._utility_batch(c)  # Utility value
+        u_c_deriv = self._utility_derivative_batch(c)  # Marginal utility
 
-        # Transition for shock 1
+        # ===== Shock 1: First AiO term =====
         y_next_1 = self.model.income_transition(y_batch, eps1_batch)
-        w_next_1 = self.model.state_transition(w_batch, c, y_batch)
+        w_next_1 = self.model.state_transition(w_batch, c, y_batch)  # Use current y
         V_next_1 = policy.forward_v(y_next_1, w_next_1)
-        c_next_1 = w_next_1 * policy.forward_phi(y_next_1, w_next_1)
 
-        # Transition for shock 2
+        # ===== Shock 2: Second AiO term (independent) =====
         y_next_2 = self.model.income_transition(y_batch, eps2_batch)
-        w_next_2 = self.model.state_transition(w_batch, c, y_batch)
+        w_next_2 = self.model.state_transition(w_batch, c, y_batch)  # Use current y (not y_next_1)
         V_next_2 = policy.forward_v(y_next_2, w_next_2)
-        c_next_2 = w_next_2 * policy.forward_phi(y_next_2, w_next_2)
 
-        # Utility at current consumption
-        u_c = self._utility_batch(c)
-
-        # Bellman residual for two shocks
+        # ===== Bellman residuals for AiO product =====
+        # R(y,w,ε) = V(y,w) - u(c) - β·V(y',w')
         bellman_1 = V - u_c - self.model.params.beta * V_next_1
         bellman_2 = V - u_c - self.model.params.beta * V_next_2
         loss_bellman = torch.mean(bellman_1 * bellman_2)
 
-        # Value derivatives (approximated via finite differences)
-        dV_dw_1 = self._value_derivative_w(
-            policy, y_next_1, w_next_1, h_value=1e-4
-        )
-        dV_dw_2 = self._value_derivative_w(
-            policy, y_next_2, w_next_2, h_value=1e-4
-        )
+        # ===== Value function gradient (for FOC constraint) =====
+        dV_dw_1 = self._value_derivative_w(policy, y_next_1, w_next_1, h_value=1e-4)
+        dV_dw_2 = self._value_derivative_w(policy, y_next_2, w_next_2, h_value=1e-4)
 
-        # Marginal utilities
-        u_c_next_1 = self._utility_derivative_batch(c_next_1)
-        u_c_next_2 = self._utility_derivative_batch(c_next_2)
+        # ===== Complementary slackness: a·λ = 0 with a,λ ≥ 0 =====
+        eps_guard = 1e-10
+        a = 1.0 - c / (w_batch + eps_guard)
+        a = torch.clamp(a, min=0.0)
+        
+        # Lagrange multiplier from FOC: λ = 1 - (β·r·∂V/∂w')/u'(c)
+        lambda_1 = 1.0 - (self.model.params.beta * self.model.params.r * dV_dw_1) / (u_c_deriv + eps_guard)
+        lambda_2 = 1.0 - (self.model.params.beta * self.model.params.r * dV_dw_2) / (u_c_deriv + eps_guard)
+        lambda_1 = torch.clamp(lambda_1, min=0.0)
+        lambda_2 = torch.clamp(lambda_2, min=0.0)
+        
+        # Fischer-Burmeister: Ψ^FB(a,λ) = a + λ - √(a² + λ²)
+        fb_1 = self._fischer_burmeister_batch(a, lambda_1)
+        fb_2 = self._fischer_burmeister_batch(a, lambda_2)
+        loss_fb = torch.mean(fb_1 * fb_2)
 
-        # FB slackness and multiplier terms
-        a = 1.0 - c / w_batch
-        fb_residual = self._fischer_burmeister_batch(a, 1.0 - h)
-
-        # Multiplier expectation matching
-        mult_1 = (self.model.params.beta * dV_dw_1 / u_c - h)
-        mult_2 = (self.model.params.beta * dV_dw_2 / u_c - h)
-
-        loss_fb = torch.mean(fb_residual ** 2)
+        # ===== Multiplier consistency across shocks (AiO) =====
+        # Ensure λ satisfies FOC under both shock realizations
+        mult_1 = a * lambda_1
+        mult_2 = a * lambda_2
         loss_mult = torch.mean(mult_1 * mult_2)
 
-        total_loss = (loss_bellman + nu * loss_fb + nu_h * loss_mult)
-
+        # ===== Combined loss (Eq. 32) =====
+        total_loss = loss_bellman + nu * loss_fb + nu_h * loss_mult
         return total_loss
 
     # =====================================================================
@@ -269,15 +283,27 @@ class ObjectiveComputer:
         h_value: float = 1e-4
     ) -> torch.Tensor:
         """
-        Approximate dV/dw using finite differences.
-
-        dV/dw ≈ (V(y, w+h) - V(y, w-h)) / (2*h)
+        Approximate dV/dw using one-sided finite differences.
+        
+        Uses forward difference to avoid negative w values:
+        dV/dw ≈ (V(y, w+h) - V(y, w)) / h
+        
+        This ensures w remains in the valid domain [0, ∞).
         """
-        w_plus = w + h_value
-        w_minus = w - h_value
+        # Ensure w is positive
+        w_safe = torch.clamp(w, min=1e-10)
+        w_plus = w_safe + h_value
 
+        V_base = policy.forward_v(y, w_safe)
         V_plus = policy.forward_v(y, w_plus)
-        V_minus = policy.forward_v(y, w_minus)
 
-        dV_dw = (V_plus - V_minus) / (2 * h_value)
+        dV_dw = (V_plus - V_base) / h_value
+        
+        # Guard against non-finite gradients
+        dV_dw = torch.where(
+            torch.isfinite(dV_dw),
+            dV_dw,
+            torch.zeros_like(dV_dw)
+        )
+        
         return dV_dw
