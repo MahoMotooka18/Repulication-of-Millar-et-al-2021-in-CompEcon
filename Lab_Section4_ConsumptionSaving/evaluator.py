@@ -51,6 +51,7 @@ class Evaluator:
             - 'euler_residual_a': (num_steps, n_test)
             - 'euler_residual_h': (num_steps, n_test)
             - 'euler_residual_fb': (num_steps, n_test)
+            - 'bellman_residual': (num_steps, n_test)
         """
         n_test = y_test.shape[0]
 
@@ -58,6 +59,7 @@ class Evaluator:
         euler_residual_a = np.zeros((num_steps, n_test))
         euler_residual_h = np.zeros((num_steps, n_test))
         euler_residual_fb = np.zeros((num_steps, n_test))
+        bellman_residual = np.zeros((num_steps, n_test))
         violation_count = 0
         violation_samples = []
         eps = 1e-12
@@ -103,9 +105,9 @@ class Evaluator:
                 c_safe = torch.clamp(c_t, min=eps)
                 w_safe = torch.clamp(w_t, min=eps)
                 u_c_t = self._utility_derivative_torch(c_safe)
+                u_t = self._utility_torch(c_t)
 
                 # Add to lifetime reward
-                u_t = self._utility_torch(c_t)
                 discount = self.model.params.beta ** t
                 lifetime_rewards += (discount * u_t.cpu().numpy())
 
@@ -114,11 +116,18 @@ class Evaluator:
                 if isinstance(x, torch.Tensor):
                     eps_t = x.to(self.device).float()
                 else:
-                # numpy array (or array-like)
                     eps_t = torch.as_tensor(x, device=self.device, dtype=torch.float32)
 
                 y_next = self.model.income_transition(y_t, eps_t)
                 w_next = self.model.state_transition(w_t, c_t, y_t)
+
+                # Get value function at current and next states
+                V_t = policy.forward_v(y_t, w_t)
+                V_next = policy.forward_v(y_next, w_next)
+                
+                # Bellman residual: R(y,w) = V(y,w) - u(c) - β·V(y',w')
+                bellman_res = V_t - u_t - self.model.params.beta * V_next
+                bellman_residual[t] = bellman_res.cpu().numpy()
 
                 # Expected marginal utility via Gauss-Hermite quadrature
                 u_c_next_exp = torch.zeros_like(u_c_t)
@@ -141,11 +150,23 @@ class Evaluator:
                     u_c_next_exp += weight * u_c_next
 
                 # Euler residuals
+                # For Bellman method, compute h from value function gradient instead of network output
+                # h = 1 - (beta * r * dV/dw) / u'(c)
+                # Use finite differences to approximate dV/dw
+                dV_dw = self._value_derivative_w(
+                    policy, y_next, w_next, h_value=1e-4
+                )
+                
                 a = 1.0 - c_t / w_safe
                 h = 1.0 - (
                     self.model.params.beta * self.model.params.r *
-                    u_c_next_exp / u_c_t
+                    dV_dw / (u_c_t + 1e-12)
                 )
+                
+                # Clamp to ensure non-negativity for complementarity
+                a = torch.clamp(a, min=0.0)
+                h = torch.clamp(h, min=0.0)
+                
                 fb = a + h - torch.sqrt(a ** 2 + h ** 2 + 1e-12)
 
                 euler_residual_a[t] = a.cpu().numpy()
@@ -161,9 +182,35 @@ class Evaluator:
             'euler_residual_a': euler_residual_a,
             'euler_residual_h': euler_residual_h,
             'euler_residual_fb': euler_residual_fb,
+            'bellman_residual': bellman_residual,
             'violation_count': violation_count,
             'violation_samples': violation_samples,
         }
+
+    def _value_derivative_w(
+        self,
+        policy,
+        y: torch.Tensor,
+        w: torch.Tensor,
+        h_value: float = 1e-4
+    ) -> torch.Tensor:
+        """
+        Approximate dV/dw using one-sided finite differences.
+        
+        Uses forward difference to avoid negative w values:
+        dV/dw ≈ (V(y, w+h) - V(y, w)) / h
+        
+        This ensures w remains in the valid domain [0, ∞).
+        """
+        w_plus = w + h_value
+        # Keep w at current value to avoid negative wealth
+        w_base = torch.clamp(w, min=1e-10)
+
+        V_plus = policy.forward_v(y, w_plus)
+        V_base = policy.forward_v(y, w_base)
+
+        dV_dw = (V_plus - V_base) / h_value
+        return dV_dw
 
     def _utility_torch(self, c: torch.Tensor) -> torch.Tensor:
         """CRRA utility on torch tensors."""
@@ -213,5 +260,18 @@ class Evaluator:
                 stats['euler_fb_mean'] = float(np.mean(abs_fb[fb_finite]))
             else:
                 stats['euler_fb_mean'] = float('nan')
+
+        # Bellman residual statistics with finite guard
+        if 'bellman_residual' in metrics:
+            br = metrics['bellman_residual']
+            abs_br = np.abs(br)
+            br_finite = np.isfinite(abs_br)
+            if abs_br.size == 0:
+                stats['bellman_mean'] = float('nan')
+            else:
+                if np.any(br_finite):
+                    stats['bellman_mean'] = float(np.mean(abs_br[br_finite]))
+                else:
+                    stats['bellman_mean'] = float('nan')
 
         return stats

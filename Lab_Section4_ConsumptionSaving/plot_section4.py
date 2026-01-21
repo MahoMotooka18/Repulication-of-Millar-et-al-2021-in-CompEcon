@@ -73,32 +73,47 @@ class SectionPlotter:
             df = data_by_size[size]
             epochs = df['epoch'].to_numpy()
             values = df['loss'].to_numpy()
-            if show_raw:
+            
+            # For bellman log scale, only plot positive values
+            if objective_name == 'bellman':
+                valid_mask = values > 0
+                valid_epochs = epochs[valid_mask]
+                valid_values = values[valid_mask]
+            else:
+                valid_epochs = epochs
+                valid_values = values
+            
+            if len(valid_values) > 0:
+                if show_raw:
+                    ax_a.plot(
+                        valid_epochs,
+                        valid_values,
+                        color=self.colors[size],
+                        linewidth=1,
+                        alpha=0.3
+                    )
+                smoothed = self._moving_average(valid_values, smoothing_window)
+                if len(smoothed) != len(valid_values):
+                    valid_epochs = valid_epochs[-len(smoothed):]
                 ax_a.plot(
-                    epochs,
-                    values,
+                    valid_epochs,
+                    smoothed,
+                    label=self.labels[size],
                     color=self.colors[size],
-                    linewidth=1,
-                    alpha=0.3
+                    linewidth=2
                 )
-            smoothed = self._moving_average(values, smoothing_window)
-            if len(smoothed) != len(values):
-                epochs = epochs[-len(smoothed):]
-            ax_a.plot(
-                epochs,
-                smoothed,
-                label=self.labels[size],
-                color=self.colors[size],
-                linewidth=2
-            )
+        
         ax_a.set_xlabel('Epoch', fontsize=12)
         ax_a.set_ylabel('Training Objective', fontsize=12)
         ax_a.set_title(f'Panel A: Training Loss ({objective_name})',
                        fontsize=12)
         ax_a.legend()
-        ax_a.grid(True, alpha=0.3)
+        ax_a.grid(True, alpha=0.3, which='both' if objective_name == 'bellman' else 'major')
         if use_log_x:
             ax_a.set_xscale('log')
+        # Apply log scale to y-axis only for bellman
+        if objective_name == 'bellman':
+            ax_a.set_yscale('log')
 
         # Panel B: Test Euler residuals
         ax_b = axes[1]
@@ -106,31 +121,46 @@ class SectionPlotter:
             df = data_by_size[size]
             epochs = df['epoch'].to_numpy()
             values = df['euler_fb_mean'].to_numpy()
-            if show_raw:
+            
+            # For bellman log scale, filter out non-positive and non-finite values
+            if objective_name == 'bellman':
+                valid_mask = (values > 0) & np.isfinite(values)
+                valid_epochs = epochs[valid_mask]
+                valid_values = values[valid_mask]
+            else:
+                valid_epochs = epochs
+                valid_values = values
+            
+            if len(valid_values) > 0:
+                if show_raw:
+                    ax_b.plot(
+                        valid_epochs,
+                        valid_values,
+                        color=self.colors[size],
+                        linewidth=1,
+                        alpha=0.3
+                    )
+                smoothed = self._moving_average(valid_values, smoothing_window)
+                if len(smoothed) != len(valid_values):
+                    valid_epochs = valid_epochs[-len(smoothed):]
                 ax_b.plot(
-                    epochs,
-                    values,
+                    valid_epochs,
+                    smoothed,
+                    label=self.labels[size],
                     color=self.colors[size],
-                    linewidth=1,
-                    alpha=0.3
+                    linewidth=2
                 )
-            smoothed = self._moving_average(values, smoothing_window)
-            if len(smoothed) != len(values):
-                epochs = epochs[-len(smoothed):]
-            ax_b.plot(
-                epochs,
-                smoothed,
-                label=self.labels[size],
-                color=self.colors[size],
-                linewidth=2
-            )
+        
         ax_b.set_xlabel('Epoch', fontsize=12)
         ax_b.set_ylabel('Test Euler Residual (mean)', fontsize=12)
         ax_b.set_title('Panel B: Test Euler Residuals', fontsize=12)
         ax_b.legend()
-        ax_b.grid(True, alpha=0.3)
+        ax_b.grid(True, alpha=0.3, which='both' if objective_name == 'bellman' else 'major')
         if use_log_x:
             ax_b.set_xscale('log')
+        # Apply log scale to y-axis only for bellman
+        if objective_name == 'bellman':
+            ax_b.set_yscale('log')
 
         # Panel C: Test lifetime reward
         ax_c = axes[2]
