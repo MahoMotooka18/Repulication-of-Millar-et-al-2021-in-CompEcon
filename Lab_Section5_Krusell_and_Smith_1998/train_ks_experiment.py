@@ -643,6 +643,7 @@ class KSExperimentRunnerComplete:
                             w_next_2_raw_sample,
                             R_next_1, R_next_2,
                             nu_h=self.config['training'].get('nu_h', 1.0),
+                            nu=self.config['training'].get('nu', 1.0),
                             input_scale_spec=self.input_scale_spec
                         )
                     )
@@ -840,7 +841,14 @@ class KSExperimentRunnerComplete:
         w_max: float,
         input_scale_spec: InputScaleSpec
     ) -> torch.Tensor:
-        """Lifetime reward training step using a finite-horizon rollout."""
+        """
+        Lifetime reward training step using a finite-horizon rollout.
+        
+        This implements proper gradient muting: only sampled agents contribute
+        gradients through the entire consumption path, while other agents' paths
+        are detached to prevent gradient flow. This ensures competitive equilibrium
+        where each agent optimizes w.r.t. own variables only.
+        """
         num_agents = len(w_init)
         T = int(self.config['model'].get('horizon', self.model.params.horizon))
 
@@ -892,8 +900,10 @@ class KSExperimentRunnerComplete:
             c_detached[sample_idx_t] = c_all[sample_idx_t]
             c_all = c_detached
 
-            c_path.append(c_all[sample_idx_t].unsqueeze(-1))
-            w_path.append(w_t[sample_idx_t].unsqueeze(-1))
+            # Store full paths for all agents (not just sampled subset)
+            # to ensure diverse agent trajectories for lifetime reward calculation
+            c_path.append(c_all.unsqueeze(-1))
+            w_path.append(w_t.unsqueeze(-1))
 
             k_next = w_t - c_all
 
