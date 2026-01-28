@@ -13,8 +13,9 @@ and example outputs/plots.
   models, training code, and reporting utilities.
 - `configs/`: YAML configuration files for running experiments.
 - `outputs/`: Example outputs (metrics, plots, checkpoints, debug logs).
-- `section4_math.md`, `section5_math.md`: Mathematical notes for each section.
-- `MMW_2021_JME.pdf`: Reference paper PDF.
+- `note.md`: Technical summary of the paper and computational setup.
+- `references/`: Reference materials, including the paper PDF.
+  - `references/MMW_2021_JME.pdf`
 
 ## Setup
 
@@ -26,12 +27,23 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+## Submission checklist
+
+- Paper PDF: `references/MMW_2021_JME.pdf`
+- Summary note: `note.md`
+- `README.md` with workflow and mapping to equations/figures
+- `requirements.txt`
+- All `.py` scripts used in the replication
+- Execution files:
+  - `Lab_Section4_ConsumptionSaving/main_section4.py`
+  - `Lab_Section5_Krusell_and_Smith_1998/main_section5.py`
+
 ## Running the Section 4 project
 
 Run the consumption-saving experiment with the default config:
 
 ```bash
-python Lab_Section4_ConsumptionSaving/run_section4_experiment.py \
+python Lab_Section4_ConsumptionSaving/main_section4.py \
   --config configs/section4.yaml \
   --device cpu
 ```
@@ -59,7 +71,7 @@ Output folders (Section 4):
 Run the Krusell and Smith (1998) experiment with the default config:
 
 ```bash
-python Lab_Section5_Krusell_and_Smith_1998/train_ks_experiment.py \
+python Lab_Section5_Krusell_and_Smith_1998/main_section5.py \
   --config configs/section5.yaml \
   --device cpu
 ```
@@ -89,3 +101,22 @@ Output folders (Section 5):
 Both projects read their settings from YAML files in `configs/`. You can
 duplicate a config file and adjust hyperparameters, paths, and training
 settings to run alternative experiments.
+
+## Mapping to paper (equations, algorithms, figures)
+
+Section 4 (Consumption-Saving):
+- Training loop, logging, output layout: `Lab_Section4_ConsumptionSaving/main_section4.py`
+- Model equations, feasibility, and shock process: `Lab_Section4_ConsumptionSaving/model_consumption_saving.py`
+- Policy parameterization (consumption share, multiplier, value): `Lab_Section4_ConsumptionSaving/nn_policy.py`
+- Objectives (lifetime reward, Euler residuals, Bellman residuals): `Lab_Section4_ConsumptionSaving/objectives.py`
+- Evaluation metrics: `Lab_Section4_ConsumptionSaving/evaluator.py`
+- Plots for training curves: `Lab_Section4_ConsumptionSaving/plot_section4.py`
+
+Section 5 (Krusell-Smith 1998):
+- Training loop, outputs, and debug artifacts: `Lab_Section5_Krusell_and_Smith_1998/main_section5.py`
+- Model equations (production, prices, transitions): `Lab_Section5_Krusell_and_Smith_1998/model_ks1998.py`
+- Policy parameterization and distribution inputs: `Lab_Section5_Krusell_and_Smith_1998/nn_policy_ks.py`
+- Objectives (lifetime reward, Euler residuals, Bellman residuals): `Lab_Section5_Krusell_and_Smith_1998/objectives_ks.py`
+- Evaluation metrics and simulation statistics: `Lab_Section5_Krusell_and_Smith_1998/evaluator_ks.py`
+- Policy scaling utilities: `Lab_Section5_Krusell_and_Smith_1998/policy_utils_ks.py`
+- Reporting (tables/summary stats): `Lab_Section5_Krusell_and_Smith_1998/report_ks.py`
