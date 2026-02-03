@@ -4,6 +4,10 @@ This repository contains code and artifacts to replicate experiments from
 Millar et al. (2021) as implemented for a computational economics course.
 It includes two main projects (Section 4 and Section 5), configuration files,
 and example outputs/plots.
+**Reference**
+The Section 5 implementation aligns with the official replication code and
+uses the `Main_KS.ipynb` notebook from `https://github.com/marcmaliar/deep-learning-euler-method-krusell-smith`
+as an implementation reference.
 
 ## Repository structure
 
@@ -96,12 +100,6 @@ Output folders (Section 5):
 - `outputs/section5/checkpoints/`: model checkpoints.
 - `outputs/section5/debug/`: debug snapshots and checks.
 
-## Configuration
-
-Both projects read their settings from YAML files in `configs/`. You can
-duplicate a config file and adjust hyperparameters, paths, and training
-settings to run alternative experiments.
-
 ## Mapping to paper (equations, algorithms, figures)
 
 Section 4 (Consumption-Saving):
@@ -120,3 +118,93 @@ Section 5 (Krusell-Smith 1998):
 - Evaluation metrics and simulation statistics: `Lab_Section5_Krusell_and_Smith_1998/evaluator_ks.py`
 - Policy scaling utilities: `Lab_Section5_Krusell_and_Smith_1998/policy_utils_ks.py`
 - Reporting (tables/summary stats): `Lab_Section5_Krusell_and_Smith_1998/report_ks.py`
+
+## Configuration
+Both projects read their settings from YAML files in `configs/`. You can
+duplicate a config file and adjust hyperparameters, paths, and training
+settings to run alternative experiments.
+
+**YAML Parameters**
+Section 4 (`configs/section4.yaml`)
+- `seed`: random seed for reproducibility.
+- `model.gamma`: CRRA coefficient.
+- `model.beta`: discount factor.
+- `model.r`: gross interest rate.
+- `model.rho`: AR(1) income persistence.
+- `model.sigma`: income shock standard deviation.
+- `model.horizon`: finite horizon used for evaluation.
+- `training.objective`: objective list (`lifetime_reward`, `euler`, `bellman`).
+- `training.network_sizes`: hidden-layer width grid.
+- `training.num_epochs`: total training epochs.
+- `training.batch_size`: minibatch size.
+- `training.learning_rate`: optimizer learning rate.
+- `training.wealth_range`: sampling bounds for wealth `[w_min, w_max]`.
+- `training.eval_interval`: evaluation frequency (epochs).
+- `training.nu`: weight on FB residual.
+- `training.nu_h`: weight on multiplier matching.
+- `plotting.smoothing_window`: moving-average window for plots.
+- `plotting.show_raw`: whether to overlay raw curves.
+- `debug.enabled`: enable debug logging.
+- `debug.interval`: debug logging interval (epochs).
+- `output_dir`: output base directory.
+- `device`: `cpu` or `cuda`.
+
+Section 5 (`configs/section5.yaml`)
+- `seed`: random seed for reproducibility.
+- `model.gamma`: CRRA coefficient (log utility when 1.0).
+- `model.beta`: discount factor.
+- `model.alpha`: capital share in production.
+- `model.delta`: depreciation rate.
+- `model.rho_y`: idiosyncratic income persistence.
+- `model.sigma_y`: idiosyncratic income volatility.
+- `model.rho_z`: aggregate TFP persistence.
+- `model.sigma_z`: aggregate TFP volatility.
+- `model.enforce_bounds`: enforce policy/wealth bounds from reference code.
+- `model.use_log_shock_shift`: apply log-shock shift used in the reference.
+- `model.num_agents`: default agent count (overridden by `training.agent_counts`).
+- `model.horizon`: finite horizon used for evaluation.
+- `training.objectives`: objective list (`lifetime_reward`, `euler`, `bellman`).
+- `training.agent_counts`: grid of agent counts for experiments.
+- `training.hidden_size`: hidden-layer width.
+- `training.distribution_features`: number of distribution inputs.
+- `training.num_epochs`: total training epochs.
+- `training.simulation_length`: simulation length for training data.
+- `training.train_every`: train every N simulated periods.
+- `training.train_points`: number of simulated points per update.
+- `training.pretrain_value_iters`: Bellman pretraining iterations.
+- `training.learning_rate`: optimizer learning rate.
+- `training.batch_size`: minibatch size.
+- `training.eval_interval`: evaluation frequency (epochs).
+- `training.eval_horizon`: evaluation simulation horizon.
+- `training.w_training_sampling.enabled`: enable broader wealth sampling.
+- `training.nu`: weight on FB residual.
+- `training.nu_h`: weight on multiplier matching.
+- `plotting.smoothing_window`: moving-average window for plots.
+- `plotting.show_raw`: whether to overlay raw curves.
+- `plotting.w_plot_max`: x-axis max for wealth plots.
+- `policy_output_types.default`: default policy output type.
+- `policy_output_types.lifetime_reward`: output type for lifetime-reward objective.
+- `policy_output_types.euler`: output type for Euler objective.
+- `policy_output_types.bellman`: output type for Bellman objective.
+- `normalization.w_normalized`: enable wealth normalization.
+- `normalization.w_scale`: wealth scale.
+- `normalization.w_shift`: wealth shift.
+- `normalization.c_normalized`: enable consumption normalization.
+- `normalization.c_scale`: consumption scale.
+- `normalization.c_shift`: consumption shift.
+- `mismatch_checks.curvature_threshold`: curvature mismatch threshold.
+- `mismatch_checks.overlap_threshold`: overlap threshold.
+- `mismatch_checks.share_variation_threshold`: consumption-share variation threshold.
+- `mismatch_checks.wealth_range_threshold`: wealth range mismatch threshold.
+- `mismatch_checks.wealth_quantile_bounds`: acceptable wealth quantile bounds.
+- `input_scaling.enabled`: enable steady-state input scaling.
+- `input_scaling.w_min`: minimum wealth for scaling.
+- `input_scaling.w_max_multiplier`: max wealth multiplier for scaling.
+- `debug.enabled`: enable debug logging.
+- `debug.interval`: debug logging interval (epochs).
+- `output_dir`: output base directory.
+- `comparison.agent_count`: agent count used in cross-objective comparison.
+- `device`: `cpu` or `cuda`.
+
+Other config files (`configs/section4_smoke.yaml`) follow the same schema and adjust only selected
+values for smoke tests or alternative experiments.
