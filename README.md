@@ -4,7 +4,9 @@ This repository contains code and artifacts to replicate experiments from
 Millar et al. (2021) as implemented for a computational economics course.
 It includes two main projects (Section 4 and Section 5), configuration files,
 and example outputs/plots.
+
 **Reference**
+
 The Section 5 implementation aligns with the official replication code and
 uses the `Main_KS.ipynb` notebook from `https://github.com/marcmaliar/deep-learning-euler-method-krusell-smith`
 as an implementation reference.
