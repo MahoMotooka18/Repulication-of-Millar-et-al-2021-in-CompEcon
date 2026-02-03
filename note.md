@@ -327,27 +327,27 @@ The Krusell–Smith implementation mirrors the consumption–saving case: the mo
 - Because agents are homogeneous in fundamentals, the decision and value functions are shared across agents; if agents differed, separate functions would be needed.
 
 **Parameterization:**
-- Consumption share, multiplier, and value function are parameterized by a common neural network:
+Consumption share, multiplier, and value function are parameterized by a common neural network.
 
-  $$
-  \frac{c_t^i}{w_t^i}=\sigma\!\big(\zeta_0+\eta(y_t^i,w_t^i,D_t,z_t;\vartheta)\big)\equiv \varphi(\cdot;\theta),
-  $$
+$$
+\frac{c_t^i}{w_t^i}=\sigma\!\big(\zeta_0+\eta(y_t^i,w_t^i,D_t,z_t;\vartheta)\big)\equiv \varphi(\cdot;\theta),
+$$
 
-  $$
-  h_t^i=\exp\!\big(\zeta_0+\eta(y_t^i,w_t^i,D_t,z_t;\vartheta)\big)\equiv h(\cdot;\theta),
-  $$
+$$
+h_t^i=\exp\!\big(\zeta_0+\eta(y_t^i,w_t^i,D_t,z_t;\vartheta)\big)\equiv h(\cdot;\theta),
+$$
 
-  $$
-  V_t^i=\zeta_0+\eta(y_t^i,w_t^i,D_t,z_t;\vartheta)\equiv V(\cdot;\theta),
-  $$
+$$
+V_t^i=\zeta_0+\eta(y_t^i,w_t^i,D_t,z_t;\vartheta)\equiv V(\cdot;\theta),
+$$
 
-  where $D_t=\{y_t^i,w_t^i\}_{i=1}^{\ell}$, $\theta=(\zeta_0,\vartheta)$, and $\sigma(x)=1/(1+e^{-x})$.
+where $D_t=\{y_t^i,w_t^i\}_{i=1}^{\ell}$, $\theta=(\zeta_0,\vartheta)$, and $\sigma(x)=1/(1+e^{-x})$.
 - Sigmoid ensures $c_t^i/w_t^i\in[0,1]$; exponential keeps $h_t^i\ge 0$; value output is unrestricted.
 - Baseline network uses two hidden layers with 64×64 neurons and sigmoid activation at the output.
 
 **Simulation (Step 2.i in Algorithm 1):**
-1. Given state $\{w_t^i,y_t^i\}_{i=1}^{\ell}, z_t$ and parameters $\theta$, compute $c_t^i/w_t^i=\varphi(\cdot;\theta)$ and $k_{t+1}^i=w_t^i-c_t^i$.
-2. Draw $y_{t+1}^i$ for all $i$ and $z_{t+1}$ using y_{t+1}^i  and z_{t+1}.
+1. Given state $\{w_t^i,y_t^i\}_{i=1}^{\ell}$, $z_t$ and parameters $\theta$, compute $c_t^i/w_t^i=\varphi(\cdot;\theta)$ and $k_{t+1}^i=w_t^i-c_t^i$.
+2. Draw $y_{t+1}^i$ for all $i$ and $z_{t+1}$ using $y_{t+1}^i  and z_{t+1}$.
 3. Compute prices $R_{t+1},W_{t+1}$ given $k_{t+1}=\sum_i k_{t+1}^i$.
 4. Update cash-on-hand $w_{t+1}^i=R_{t+1}k_{t+1}^i+W_{t+1}\exp(y_{t+1}^i)$.
 5. Compute $c_{t+1}^i/w_{t+1}^i=\varphi(y_{t+1}^i,w_{t+1}^i,D_{t+1},z_{t+1};\theta)$ for all $i$.
