@@ -346,7 +346,10 @@ where $D_t=\{y_t^i,w_t^i\}_{i=1}^{\ell}$, $\theta=(\zeta_0,\vartheta)$, and $\si
 - Baseline network uses two hidden layers with 64×64 neurons and sigmoid activation at the output.
 
 **Simulation (Step 2.i in Algorithm 1):**
-1. Given state $\left\{w_t^i,y_t^i\right\}_{i=1}^{\ell}$, $z_t$ and parameters $\theta$, compute $\frac{c_t^i}{w_t^i}=\varphi(\cdot;\theta)$ and $k_{t+1}^i=w_t^i-c_t^i$.
+1. Given state $\left\{w_t^i,y_t^i\right\}_{i=1}^{\ell}$, 
+
+$z_t$ and parameters $\theta$, compute $\frac{c_t^i}{w_t^i}=\varphi(\cdot;\theta)$ and $k_{t+1}^i=w_t^i-c_t^i$.
+
 2. Draw $y_{t+1}^i$ for all $i$ and $z_{t+1}$ using $y_{t+1}^i$  and $z_{t+1}$.
 3. Compute prices $R_{t+1},W_{t+1}$ given $k_{t+1}=\sum_i k_{t+1}^i$.
 4. Update cash-on-hand $w_{t+1}^i=R_{t+1}k_{t+1}^i+W_{t+1}\exp(y_{t+1}^i)$.
