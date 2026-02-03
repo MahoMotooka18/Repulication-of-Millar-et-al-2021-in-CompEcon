@@ -346,7 +346,7 @@ where $D_t=\{y_t^i,w_t^i\}_{i=1}^{\ell}$, $\theta=(\zeta_0,\vartheta)$, and $\si
 - Baseline network uses two hidden layers with 64×64 neurons and sigmoid activation at the output.
 
 **Simulation (Step 2.i in Algorithm 1):**
-1. Given state $\left\{w_t^i,y_t^i\right\}_{i=1}^{\ell}$, 
+1. Given state ${w_t^i,y_t^i}_{i=1}^{\ell}$, 
 
 $z_t$ and parameters $\theta$, compute $\frac{c_t^i}{w_t^i}=\varphi(\cdot;\theta)$ and $k_{t+1}^i=w_t^i-c_t^i$.
 
