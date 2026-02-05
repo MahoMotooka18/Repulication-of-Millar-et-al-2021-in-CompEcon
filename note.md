@@ -17,10 +17,12 @@ The core research question is whether deep learning can provide a unified way to
 The AiO operator is critical when models have **many stochastic shocks**. 
 
 For Euler-residual objectives with a squared conditional expectation,
+
 $$
 E_{(m,s)}\Big(E_{\varepsilon}[f(m,s,\varepsilon)]\Big)^2,
 $$
-standard quadrature would require a **tensor-product grid** over shocks, so the number of integration nodes explodes with the number of shocks. 
+
+Standard quadrature would require a **tensor-product grid** over shocks, so the number of integration nodes explodes with the number of shocks. 
 
 AiO avoids this by using **two independent random shock draws** $\varepsilon'$ and $\varepsilon''$ and rewriting the square as an expectation of a product:
 
@@ -38,9 +40,19 @@ $$
 \nabla E(\theta)=\nabla E_{\omega}[\xi(\omega;\theta)] \approx \frac{1}{n}\sum_{i=1}^n \nabla_{\theta}\xi(\omega_i;\theta).
 $$
 
-In the limit $n=1$, the method becomes **stochastic gradient descent**, where each update uses only **one randomly selected state draw** and **two shock draws**.
+where $k$ is iteration, $\nabla E(\theta)$ is a gradient of $E(\theta)$.
 
-### 4.3 DL solution algorithm
+By using sample average of gradients, we can approximate the gradient as follows:
+
+$$
+\theta_{k+1} \leftarrow \theta_k - \lambda_k [ \frac{1}{n}\sum_{i=1}^{n} \nabla_{\theta}\,\xi(\omega_i;\theta_k) ]
+$$
+
+where $\lambda_k$ is a learning rate.
+
+In the limit $n=1$, the method above becomes **stochastic gradient descent**, where each update uses only **one randomly selected state draw** and **two shock draws**.
+
+### 2.2 DL solution algorithm
 Algorithm 1 (as described in the paper) can be summarized as follows.
 
 Step 1. Initialize the algorithm:
@@ -50,7 +62,7 @@ Step 1. Initialize the algorithm:
 4. Fix initial vector of coefficients $\theta$.
 
 Step 2. Train the machine, i.e., find $\theta$ that minimizes empirical risk $\hat{E}(\theta)$:
-1. Simulate the model to produce data $\{\omega_i\}_{i=1}^n$ by using the decision rule $\varphi(\cdot;\theta)$.
+1. Simulate the model to produce data ${\omega_i}_{i=1}^n$ by using the decision rule $\varphi(\cdot;\theta)$.
 2. Construct the gradient $\nabla \hat{E}(\theta)=\frac{1}{n}\sum_{i=1}^n \nabla_{\theta}\xi(\omega_i;\theta)$.
 3. Update coefficients $\theta \leftarrow \theta - \lambda \nabla \hat{E}(\theta)$ and return to Step 2.1.
 
@@ -58,14 +70,14 @@ End Step 2 if the convergence criterion $|\hat{\theta}-\theta|\ll \varepsilon$ i
 
 Step 3. Assess the accuracy of the constructed approximation $\varphi(\cdot;\theta)$ on a new sample.
 
-The algorithm has multiple hyperparameters: network topology, learning rate, number of simulation points and integration nodes, training method, and possibly regularization (e.g., Tikhonov or Lasso) to address overfitting and ill-conditioning. The objective function also has hyperparameters such as **relative weights on model equations**, and these are selected by standard validation procedures (accuracy and speed).
+The algorithm has multiple hyperparameters: network topology, learning rate, number of simulation points and integration nodes, training method, and possibly regularization (e.g., Tikhonov or Lasso) to address overfitting and ill-conditioning. The objective function also has hyperparameters such as **relative weights of the different model equations**, and these are selected by standard validation procedures (accuracy and speed).
 
-### 2.2 Application 1: Consumption–saving with borrowing constraint
-#### 2.2.1 Model
+### 2.3 Application 1: Consumption–saving with borrowing constraint
+#### 2.3.1 Model
 The consumption–saving problem is
 
 $$
-\max_{\{c_t,w_{t+1}\}_{t\ge 0}}\;\mathbb{E}_0\left[\sum_{t=0}^{\infty}\beta^t u(c_t)\right]
+\max_{(c_t,w_{t+1})_{t = 0}^{\infty}}\;\mathbb{E}_0\left[\sum_{t=0}^{\infty}\beta^t u(c_t)\right]
 $$
 
 subject to
@@ -84,8 +96,8 @@ $$
 
 **Assumptions:**
 - Utility is CRRA: $u(c)=(c^{1-\gamma}-1)/(1-\gamma)$, $\gamma>0$.
-- Discount factor $\beta\in(0,1)$; gross interest rate $r>0$.
-- Income follows AR(1) with persistence $\rho$ and volatility $\sigma$; shocks are standard normal.
+- Discount factor $\beta\in(0,1)$.
+- Exogenous income shock follows AR(1) with persistence $\rho$ and volatility $\sigma$; shocks are standard normal.
 - Borrowing is not allowed: $c_t\le w_t$.
 - Temporary income shock: $y_t=\sigma\varepsilon_t$, so the only state variable is $w_t$.
 - $y_t$ is drawn from its ergodic (Normal) distribution.
@@ -96,7 +108,7 @@ $$
 - $c_t$: consumption at time $t$.
 - $w_t$: cash-on-hand at time $t$.
 - $w_{t+1}$: next-period cash-on-hand.
-- $y_t$: income (log income shock) at time $t$.
+- $y_t$: Exogenous income shock (log income shock) at time $t$.
 - $\varepsilon_t$: standard normal shock.
 - $u(c_t)$: per-period utility from consumption.
 
@@ -104,20 +116,22 @@ $$
 - $\beta=0.9$
 - $r=1.04$
 - $\rho=0$
-- $\gamma = 2$
-- $\sigma=0.1$ (risk-aversion)
+- $\gamma = 2$ (risk-aversion)
+- $\sigma=0.1$ 
 - $w_1, w_2$ (bounds of the uniform draw for $w_t$)
 
-The policy is parameterized as a **consumption share** $c_t/w_t=\sigma(\zeta_0+\eta(y_t,w_t;\vartheta))$. The paper implements **three versions** of the DL method (lifetime reward, Euler, Bellman) and shows close agreement across them.
+The policy is parameterized as a **consumption share** $c_t/w_t=\sigma(\zeta_0+\eta(y_t,w_t;\vartheta))$. 
 
-#### 2.2.2 Euler equation as the solution
+The paper implements **three versions** of the DL method (lifetime reward, Euler, Bellman) and shows close agreement across them.
+
+#### 2.3.2 Euler equation as the solution
 The solution to the model can be characterized by **Kuhn–Tucker conditions**:
 
 $$
 A\ge 0,\quad H\ge 0,\quad AH=0,
 $$
 
-where $A=w-c$ and $H=u'(c)-\beta r\,\mathbb{E}_\varepsilon[u'(c')]$ is the Lagrange multiplier.  
+where $A=w-c$ and $H=u'(c)-\beta r \mathbb{E}_\varepsilon[u'(c')]$ is the Lagrange multiplier.  
 To build a differentiable DL objective, the inequality system is rewritten as the **Fischer–Burmeister (FB) function**:
 
 $$
@@ -128,11 +142,11 @@ with unit-free terms $a=1-\frac{c}{w}$ and $h=1-\frac{\beta r \mathbb{E}_\vareps
 
 If needed, a weight $\nu>0$ can scale the second term, i.e., $\Psi^{FB}(a,\nu h)$, to balance the relative importance of the two objectives.
 
-#### 2.2.3 Bellman equation as the solution
+#### 2.3.3 Bellman equation as the solution
 The same model can be characterized by the **Bellman equation**:
 
 $$
-V(y,w)=\max_{c,w'}{u(c)+\beta\,\mathbb{E}_\varepsilon[V(y',w')]},
+V(y,w)=\max_{c,w'} \lbrace u(c)+\beta\,\mathbb{E}_\varepsilon[V(y',w')] \rbrace,
 $$
 
 subject to the transition and constraints in the model.  
@@ -151,8 +165,8 @@ $$
 
 This provides a differentiable way to incorporate the Bellman maximization conditions into the DL objective.
 
-#### 2.2.4 Deep learning solution method
-To implement the lifetime-reward, Euler, and Bellman methods, the paper uses **Algorithm 1**; the only difference across methods is how the model is simulated in Step 2.i and which network outputs are used (policy only, policy + multiplier, or policy + multiplier + value).
+#### 2.3.4 Deep learning solution method
+To implement the lifetime-reward, Euler, and Bellman methods, the paper uses **Algorithm 1**; the only difference across methods is how the model is simulated in Step 2.1 and which network outputs are used (policy only, policy + multiplier, or policy + multiplier + value).
 
 The decision rule, multiplier, and value function share a common neural network representation:
 
@@ -170,7 +184,13 @@ $$
 
 where $\eta(\cdot)$ is the neural network, $\theta=(\zeta_0,\vartheta)$, and $\sigma(x)=1/(1+e^{-x})$. 
 
-The sigmoid bounds consumption shares in $[0,1]$, the exponential keeps $h_t\ge 0$, and the linear head leaves $V_t$ unrestricted.
+The lifetime reward method will use only $\varphi(y_t,w_t;\theta)$.
+
+The Euler method will use both $\varphi(y_t,w_t;\theta)$ and h(y_t,w_t;\theta).
+
+The Bellman method will use all three of them.
+
+The sigmoid bounds consumption shares in $[0,1]$, the exponential keeps $h_t\ge 0$, and the linear activation leaves $V_t$ unrestricted.
 
 Training uses stochastic optimization with re-sampled simulation points each epoch, and accuracy is evaluated on a fresh sample with numerical integration.
 
@@ -181,16 +201,16 @@ Training uses stochastic optimization with re-sampled simulation points each epo
 - Optimizer: Adam; learning rate $\lambda=0.001$.
 - Training length: $K=50000$ epochs.
 - Per-epoch training sample: 64 random draws of $w_t$ from $[w_1,w_2]=[0.1,4]$.
-- Accuracy evaluation: 8,192 random draws and a 10-node Gauss–Hermite rule for integrals.
+- Accuracy evaluation: 8192 random draws and a 10-node Gauss–Hermite rule for integrals.
 - Implementation: Python with TensorFlow 1.14.0; Intel i7-7500U (2.70GHz), RAM 16GB, 4 physical (8 virtual) cores.
 
-#### 2.2.5 Objective 1: Lifetime reward
+#### 2.3.5 Objective 1: Lifetime reward
 This objective follows directly from the original problem: fix a decision rule $c_t/w_t=\varphi(y_t,w_t;\theta)$, simulate the model forward for a finite horizon $T$, and evaluate the discounted utility along the simulated path. 
 
-Using the AiO draw $\omega=(y_0,w_0,\varepsilon_1,\ldots,\varepsilon_T)$, the expected loss becomes a single Monte Carlo expectation:
+Using the AiO operater, the expected loss becomes a single Monte Carlo expectation:
 
 $$
-\Xi(\theta)=E_{\omega}\!\left[\sum_{t=0}^{T}\beta^t u(c_t)\right].
+\Xi(\theta)=E_{\omega}[\xi(\omega;\theta)] = E_{(y_0,w_0,\epsilon_1,\ldots,\epsilon_T)}\left[\sum_{t=0}^{T}\beta^t u(c_t)\right]
 $$
 
 **Random Draw:**
@@ -201,13 +221,13 @@ $$
 
 Algorithm 1 minimizes this by repeatedly simulating paths under $\varphi$ and updating $\theta$ with stochastic gradients.
 
-#### 2.2.6 Objective 2: Euler equation (Kuhn–Tucker + AiO)
+#### 2.3.6 Objective 2: Euler equation (Kuhn–Tucker + AiO)
 Start from the Kuhn–Tucker conditions for the borrowing constraint and rewrite them with the differentiable Fischer–Burmeister (FB) function. Because the Euler term contains a conditional expectation inside a nonlinear transformation, the paper introduces a separate approximation for the multiplier $h$, and then applies the AiO operator with two **independent** shocks to avoid nested expectations under the square. The resulting Euler objective is
 
 $$
-\Xi(\theta)=E_{y,w,\varepsilon_1,\varepsilon_2}\Bigg[\Psi^{FB}\!\left(1-\tfrac{c}{w},1-h\right)^2
-+\nu_h\Big(\tfrac{\beta r\,u'(c')}{u'(c)}\big|_{\varepsilon_1}-h\Big)
-\cdot\Big(\tfrac{\beta r\,u'(c')}{u'(c)}\big|_{\varepsilon_2}-h\Big)\Bigg].
+\Xi(\theta)=E_{(y,w,\varepsilon_1,\varepsilon_2)}\Bigg[\Psi^{FB} \left(1-\tfrac{c}{w},1-h\right)^2
++\nu_h\Big(\tfrac{\beta r\,u'(c')\big|_{\varepsilon_1}}{u'(c)}-h\Big)
+\cdot\Big(\tfrac{\beta r\,u'(c')\big|_{\varepsilon_2}}{u'(c)}-h\Big)\Bigg].
 $$
 
 **Random Draw:**
@@ -217,15 +237,23 @@ $$
 - $c/w=\varphi(y,w;\theta)$.
 - $h=h(y,w;\theta)$.
 
-#### 2.2.7 Objective 3: Bellman equation (residual + FB + AiO)
+#### 2.3.7 Objective 3: Bellman equation (residual + FB + AiO)
 The Bellman method combines the Bellman residual with the maximization conditions, again enforced via the FB function. The multiplier now depends on the value-function derivative $V_w$, so the method approximates $V$, $\varphi$, and $h$. Applying the two-shock AiO construction to the squared residuals yields:
 
 $$
-\Xi(\theta)=E_{y,w,\varepsilon_1,\varepsilon_2}\Big[
-\big(V-u-\beta V'|_{\varepsilon_1}\big)\big(V-u-\beta V'|_{\varepsilon_2}\big)
-+\Psi^{FB}\!\left(1-\tfrac{c}{w},1-h\right)^2
-+\nu_h\big(\tfrac{\beta V_w'}{u'(c)}\big|_{\varepsilon_1}-h\big)\big(\tfrac{\beta V_w'}{u'(c)}\big|_{\varepsilon_2}-h\big)
-\Big].
+\Xi(\theta)=E_{\omega}[\xi(\omega;\theta)]
+=E_{(y,w,\varepsilon_1,\varepsilon_2)}\Bigg\{
+\Big[V(y,w;\theta)-u(c)-\beta V(y',w';\theta)\Big]_{\varepsilon=\varepsilon_1}
+\Big[V(y,w;\theta)-u(c)-\beta V(y',w';\theta)\Big]_{\varepsilon=\varepsilon_2}
++\nu\Big[\Psi^{FB}\!\left(1-\tfrac{c}{w},\,1-h\right)\Big]^2
++\nu_h
+\Big[
+\frac{\beta \frac{\partial}{\partial w'}V(y',w';\theta)}{u'(c)}
+\Big]_{\varepsilon=\varepsilon_1}-h
+\Big[
+\frac{\beta \frac{\partial}{\partial w'}V(y',w';\theta)}{u'(c)}
+\Big]_{\varepsilon=\varepsilon_2}-h
+\Bigg\}.
 $$
 
 **Random Draw:**
@@ -243,7 +271,7 @@ and $\varepsilon_1,\varepsilon_2$ independent draws from $\mathcal{N}(0,1)$.
 Each heterogeneous agent $i=1,\ldots,\ell$ solves
 
 $$
-\max_{\{c_t^i,k_{t+1}^i\}^{\infty}_{t\ge 0}} \; \mathbb{E}_0\left[\sum_{t=0}^{\infty}\beta^t u(c_t^i)\right],
+\max_{(c_t^i,k_{t+1}^i\)^{\infty}_{t\ge 0}} \; \mathbb{E}_0\left[\sum_{t=0}^{\infty}\beta^t u(c_t^i)\right],
 $$
 
 subject to
@@ -263,7 +291,7 @@ $$
 and aggregate production is Cobb–Douglas,
 
 $$
-Y_t = z_t k_t^{\alpha},
+Y_t = z_t k_t^{\alpha}[\sum_{i=1}^{\ell}\exp(y_t^i)\Big],
 \qquad
 z_{t+1}=\rho_z z_t+\sigma_z \varepsilon_t,\quad \varepsilon_t\sim\mathcal{N}(0,1).
 $$
@@ -271,8 +299,8 @@ $$
 Equilibrium prices are
 
 $$
-R_t = 1-d + z_t \alpha k_t^{\alpha-1}\Big[\tfrac{1}{\ell}\sum_{i=1}^{\ell}\exp(y_t^i)\Big],\qquad
-W_t = z_t (1-\alpha) k_t^{\alpha}\Big[\tfrac{1}{\ell}\sum_{i=1}^{\ell}\exp(y_t^i)\Big],
+R_t = 1-d + z_t \alpha k_t^{\alpha-1}\Big[\sum_{i=1}^{\ell}\exp(y_t^i)\Big],\qquad
+W_t = z_t (1-\alpha) k_t^{\alpha}\Big[\sum_{i=1}^{\ell}\exp(y_t^i)\Big],
 $$
 
 where aggregate capital is $k_t=\sum_{i=1}^{\ell}k_t^i$ and $k_{t+1}^i=w_t^i-c_t^i$. 
@@ -288,9 +316,9 @@ Initial conditions $(y_0^i,w_0^i)$ and $z_0$ are given.
 - $c_t^i$: consumption of agent $i$ at time $t$.
 - $k_{t+1}^i = w_t^i - c_t^i$: next-period capital of agent $i$.
 - $w_t^i$: cash-on-hand of agent $i$.
-- $y_t^i$: idiosyncratic productivity (log) of agent $i$.
+- $y_t^i$: idiosyncratic productivity of agent $i$.
 - $\varepsilon_t^i$: idiosyncratic shock.
-- $z_t$: aggregate productivity (log).
+- $z_t$: aggregate productivity.
 - $\varepsilon_t$: aggregate shock.
 - $R_t$: gross interest rate.
 - $W_t$: wage.
@@ -302,17 +330,10 @@ Initial conditions $(y_0^i,w_0^i)$ and $z_0$ are given.
 **Parameters:**
 - Preferences: $u(c)=\frac{c^{1-\gamma}-1}{1-\gamma}$ with $\gamma=1$.
 - Discount factor: $\beta=0.96$.
-- Capital share: $\alpha\in(0,1)$.
-- Depreciation: $d\in(0,1]$.
+- Capital share: $\alpha\in(0,1)$ (In the replication, we set $\alpha = 0.36$).
+- Depreciation: $d\in(0,1]$ (In the replication, we set $d = 0.08$).
 - Idiosyncratic shock: $\rho_y=0.9$, $\sigma_y=0.2(1-\rho_y^2)^{1/2}$.
 - Aggregate shock: $\rho_z=0.95$, $\sigma_z=0.01$.
-
-**Households:** choose $c^i_t$, $k^i_{t+1}$ subject to
-$w^i_{t+1}=R_{t+1}(w^i_t-c^i_t)+W_{t+1}e^{y^i_{t+1}}$.
-
-**Idiosyncratic shock:** $y^i_{t+1}=\rho_y y^i_t+\sigma_y\varepsilon^i_{t+1}$.  
-**Aggregate shock:** $z_{t+1}=\rho_z z_t+\sigma_z\epsilon_{t+1}$.  
-**Prices:** from Cobb–Douglas production with capital and labor aggregates.
 
 The policy uses a neural network that depends on individual and aggregate states.
 
@@ -330,11 +351,11 @@ The Krusell–Smith implementation mirrors the consumption–saving case: the mo
 Consumption share, multiplier, and value function are parameterized by a common neural network.
 
 $$
-\frac{c_t^i}{w_t^i}=\sigma\!\big(\zeta_0+\eta(y_t^i,w_t^i,D_t,z_t;\vartheta)\big)\equiv \varphi(\cdot;\theta),
+\frac{c_t^i}{w_t^i}=\sigma \big(\zeta_0+\eta(y_t^i,w_t^i,D_t,z_t;\vartheta)\big)\equiv \varphi(\cdot;\theta),
 $$
 
 $$
-h_t^i=\exp\!\big(\zeta_0+\eta(y_t^i,w_t^i,D_t,z_t;\vartheta)\big)\equiv h(\cdot;\theta),
+h_t^i=\exp \big(\zeta_0+\eta(y_t^i,w_t^i,D_t,z_t;\vartheta)\big)\equiv h(\cdot;\theta),
 $$
 
 $$
@@ -346,11 +367,11 @@ where $D_t=\{y_t^i,w_t^i\}_{i=1}^{\ell}$, $\theta=(\zeta_0,\vartheta)$, and $\si
 - Baseline network uses two hidden layers with 64×64 neurons and sigmoid activation at the output.
 
 **Simulation (Step 2.i in Algorithm 1):**
-1. Given state ${w_t^i,y_t^i}_{i=1}^{\ell}$, 
+1. Given state ${w_t^i,y_t^i}_{i=1}^{\ell}$, $z_t$ and parameters $\theta$, 
 
-$z_t$ and parameters $\theta$, compute $\frac{c_t^i}{w_t^i}=\varphi(\cdot;\theta)$ and $k_{t+1}^i=w_t^i-c_t^i$.
+compute $\frac{c_t^i}{w_t^i}=\varphi(y_t^i,w_t^i,D_t,z_t;\vartheta;\theta)$ and $k_{t+1}^i=w_t^i-c_t^i$.
 
-2. Draw $y_{t+1}^i$ for all $i$ and $z_{t+1}$ using $y_{t+1}^i$  and $z_{t+1}$.
+2. Draw $y_{t+1}^i$ for all $i(1,...\ell)$ and $z_{t+1}$ using $y_{t+1}^i$  and $z_{t+1}$.
 3. Compute prices $R_{t+1},W_{t+1}$ given $k_{t+1}=\sum_i k_{t+1}^i$.
 4. Update cash-on-hand $w_{t+1}^i=R_{t+1}k_{t+1}^i+W_{t+1}\exp(y_{t+1}^i)$.
 5. Compute $c_{t+1}^i/w_{t+1}^i=\varphi(y_{t+1}^i,w_{t+1}^i,D_{t+1},z_{t+1};\theta)$ for all $i$.
@@ -370,7 +391,7 @@ For the Krusell–Smith model, the lifetime-reward objective follows directly fr
 
 $$
 \Xi(\theta)=E_{\omega}\big[\xi(\omega;\theta)\big]\equiv
-E_{Y_0,W_0,z_0,\Sigma,\varepsilon}\left[\sum_{t=0}^{T}\beta^t u(c_t^i)\right].
+E_{(Y_0,W_0,z_0,\Sigma,\varepsilon)}\left[\sum_{t=0}^{T}\beta^t u(c_t^i)\right].
 $$
 
 Here $Y_0=(y_0^1,\ldots,y_0^{\ell})$, $W_0=(w_0^1,\ldots,w_0^{\ell})$, and $\Sigma$ collects idiosyncratic shocks for all agents over $t=1,\ldots,T$; $\varepsilon=(\varepsilon_1,\ldots,\varepsilon_T)$ are aggregate shock innovations.
@@ -378,19 +399,21 @@ Here $Y_0=(y_0^1,\ldots,y_0^{\ell})$, $W_0=(w_0^1,\ldots,w_0^{\ell})$, and $\Sig
 Because the competitive equilibrium requires each agent’s utility to be maximized with respect to their own variables (not others’), the implementation **mutes** cross-agent gradients in TensorFlow. Since shocks are autocorrelated, training uses cross-sections sufficiently separated in time to reduce gradient bias.
 
 **Random Draw:**
-- $\omega=(Y_0,W_0,z_0,\Sigma,\varepsilon)$, where $Y_0=(y_0^1,\ldots,y_0^{\ell})$, $W_0=(w_0^1,\ldots,w_0^{\ell})$, $\Sigma=(\varepsilon_t^1,\ldots,\varepsilon_t^{\ell})_{t=1}^T$ are idiosyncratic shocks, and $\varepsilon=(\varepsilon_1,\ldots,\varepsilon_T)$ are aggregate shocks.
+- $\omega=(Y_0,W_0,z_0,\Sigma,\varepsilon)$, where $Y_0=(y_0^1,\ldots,y_0^{\ell})$, $W_0=(w_0^1,\ldots,w_0^{\ell})$, $\Sigma=(\varepsilon_t^1,\ldots,\varepsilon_t^{\ell})_{t=1}^T$.
 
 **Decision Rules:**
-- $c_t^i/w_t^i=\varphi(y_t^i,w_t^i,D_t,z_t;\theta)$, with transitions (38)–(41) used to generate the simulated path.
+- $c_t^i/w_t^i=\varphi(y_t^i,w_t^i,D_t,z_t;\theta)$, with transitions of the model used to generate the simulated path.
 
 ### 3.4 Euler-equation method with Kuhn–Tucker conditions
-The Euler objective is parallel to that of 2.2.6 in the consumption–saving problem. Applying the AiO operator with two uncorrelated shock draws yields:
+The Euler objective is parallel to that of 2.2.6 in the consumption–saving problem. 
+
+Applying the AiO operator with two uncorrelated shock draws yields:
 
 $$
 \Xi(\theta)=E_{Y_t,W_t,z_t,\Sigma_1,\Sigma_2,\varepsilon_1,\varepsilon_2}\Bigg[
-\Psi^{FB}\!\left(1-\tfrac{c_t^i}{w_t^i},1-h_t^i\right)^2
-+\nu\Big(\tfrac{\beta R_{t+1}u'(c_{t+1}^i)}{u'(c_t^i)}\big|_{\Sigma_1,\varepsilon_1}-h_t^i\Big)
-\cdot\Big(\tfrac{\beta R_{t+1}u'(c_{t+1}^i)}{u'(c_t^i)}\big|_{\Sigma_2,\varepsilon_2}-h_t^i\Big)
+\Big[\Psi^{FB} \left(1-\tfrac{c_t^i}{w_t^i},1-h_t^i\right)\Big]^2
++\nu\Big(\tfrac{\beta R_{t+1}u'(c_{t+1}^i)\big|_{\Sigma_1,\varepsilon_1}}{u'(c_t^i)}-h_t^i\Big)
+\cdot\Big(\tfrac{\beta R_{t+1}u'(c_{t+1}^i)\big|_{\Sigma_2,\varepsilon_2}}{u'(c_t^i)}-h_t^i\Big)
 \Bigg].
 $$
 
@@ -404,17 +427,40 @@ Here $Y_t=(y_t^1,\ldots,y_t^{\ell})$, $W_t=(w_t^1,\ldots,w_t^{\ell})$, and $\Sig
 - $h_t^i=h(y_t^i,w_t^i,D_t,z_t;\theta)$.
 
 ### 3.5 Objective 3: Bellman equation
-The Bellman objective parallels that of 2.2.7 and combines the Bellman residual with the FB term and the multiplier condition, again using two independent shock draws:
+The Bellman objective parallels that of 2.2.7 and combines the Bellman residual with the FB term and the multiplier condition
+
+Using two independent shock draws:
 
 $$
 \begin{aligned}
-\Xi(\theta) &= E_{Y_t,W_t,z_t,\Sigma_1,\Sigma_2,\varepsilon_1,\varepsilon_2}\Big[ \\
-&\quad \big(V(s_t^i;\theta)-u(c_t^i)-\beta V(s_{t+1}^i;\theta)\big|_{\Sigma_1,\varepsilon_1}\big)
-\cdot\big(V(s_t^i;\theta)-u(c_t^i)-\beta V(s_{t+1}^i;\theta)\big|_{\Sigma_2,\varepsilon_2}\big) \\
-&\quad + \nu\big[\Psi^{FB}\!\left(1-\tfrac{c_t^i}{w_t^i},1-h_t^i\right)\big]^2 \\
-&\quad + \nu_h\Big(\tfrac{\beta\,\partial_{w_{t+1}^i}V(s_{t+1}^i;\theta)}{u'(c_t^i)}\big|_{\Sigma_1,\varepsilon_1}-h_t^i\Big)
-\cdot\Big(\tfrac{\beta\,\partial_{w_{t+1}^i}V(s_{t+1}^i;\theta)}{u'(c_t^i)}\big|_{\Sigma_2,\varepsilon_2}-h_t^i\Big)
-\Big].
+\Xi(\theta)
+&= E_{\omega}[\xi(\omega;\theta)] \\
+&\equiv E_{(Y_t,W_t,z_t,\Sigma_1,\Sigma_2,\varepsilon_1,\varepsilon_2)}
+\Bigg\{
+\Big[
+V(s_t^i;\theta)-u(c_t^i)-\beta V(s_{t+1}^i;\theta)
+\Big]_{\Sigma=\Sigma_1,\varepsilon=\varepsilon_1} \\
+&\qquad \times
+\Big[
+V(s_t^i;\theta)-u(c_t^i)-\beta V(s_{t+1}^i;\theta)
+\Big]_{\Sigma=\Sigma_2,\varepsilon=\varepsilon_2} \\
+&\qquad + \nu
+\Big[
+\Psi^{FB}\!\left(1-\tfrac{c_t^i}{w_t^i},\,1-h_t^i\right)
+\Big]^2 \\
+&\qquad + \nu_h
+\Big[
+\frac{\beta\,\frac{\partial}{\partial w_{t+1}^i}V(s_{t+1}^i;\theta)}
+     {u'(c_t^i)}
+\Big]_{\Sigma=\Sigma_1,\varepsilon=\varepsilon_1}
+-h_t^i \\
+&\qquad \times
+\Big[
+\frac{\beta\,\frac{\partial}{\partial w_{t+1}^i}V(s_{t+1}^i;\theta)}
+     {u'(c_t^i)}
+\Big]_{\Sigma=\Sigma_2,\varepsilon=\varepsilon_2}
+-h_t^i
+\Bigg\}.
 \end{aligned}
 $$
 

@@ -39,15 +39,33 @@ from policy_utils_ks import (
 
 
 class KSExperimentRunnerComplete:
-    """Experiment runner with all outputs per section5_math.md."""
+    """
+    Complete experiment orchestration for Krusell-Smith heterogeneous-agent training.
+    
+    Manages end-to-end pipeline:
+    1. Configuration loading and validation
+    2. Model initialization with shock processes
+    3. Policy network training on three objectives
+    4. Evaluation and metrics computation
+    5. Plotting and table generation per section5_math.md requirements
+    
+    Supports flexible input/output normalization, distribution feature construction,
+    and comprehensive metrics including Euler residuals, Bellman errors, and
+    Krusell-Smith regression coefficients for model validation.
+    """
 
-    def __init__(self, config_path: str, device: str = 'cpu'):
+    def __init__(self, config_path: str, device: str = 'cpu') -> None:
         """
-        Initialize experiment runner.
+        Initialize Krusell-Smith experiment runner.
+        
+        Sets up complete training environment including model, policy network,
+        objectives, and evaluator. Loads YAML configuration and validates all
+        hyperparameters and data specifications.
         
         Args:
-            config_path: path to YAML config
-            device: 'cpu' or 'cuda'
+            config_path: Path to YAML configuration file with model params,
+                network architecture, training hyperparameters.
+            device: Computing device ('cpu' or 'cuda'). Default: 'cpu'.
         """
         self.device = device
         self.config = self._load_config(config_path)
@@ -114,8 +132,20 @@ class KSExperimentRunnerComplete:
 
         return eval(compile(node, "<expr>", "eval"), {"__builtins__": {}}, allowed_names)
 
-    def setup_directories(self):
-        """Create output directories per section5_math.md."""
+    def setup_directories(self) -> None:
+        """
+        Create output directory structure for experiment results per section5_math.md.
+        
+        Creates timestamped run directory with subdirectories for:
+        - checkpoints: Saved policy network weights
+        - plots: Generated figures (impulse responses, distributions, etc.)
+        - tables: Summary statistics and convergence tables
+        - comparison: Numerical comparisons to known solutions or benchmarks
+        - debug: Diagnostic data (constraint violations, residual distributions)
+        
+        Returns:
+            None. Sets self.output_dir, self.checkpoint_dir, self.plots_dir, etc.
+        """
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         run_id = timestamp
         
@@ -137,8 +167,18 @@ class KSExperimentRunnerComplete:
         
         print(f"Output directory: {self.output_dir}")
 
-    def initialize_model(self):
-        """Initialize KS model."""
+    def initialize_model(self) -> None:
+        """
+        Initialize Krusell-Smith 1998 model with configured parameters.
+        
+        Reads model parameters from config (gamma, beta, alpha, delta,
+        AR(1) productivity and TFP shock parameters) and instantiates
+        KrusellSmithModel. Model defines utility function, state transitions,
+        and shock processes used by all training objectives and evaluators.
+        
+        Returns:
+            None. Sets self.model with initialized KrusellSmithModel.
+        """
         params = KrusellSmithParams(
             gamma=self.config['model']['gamma'],
             beta=self.config['model']['beta'],

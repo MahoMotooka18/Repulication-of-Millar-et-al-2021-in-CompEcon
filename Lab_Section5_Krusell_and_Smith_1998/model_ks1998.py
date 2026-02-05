@@ -16,36 +16,46 @@ from typing import Tuple, Optional, Dict
 
 @dataclass
 class KrusellSmithParams:
-    """Parameters for Krusell-Smith 1998 model."""
+    """
+    Parameters for Krusell-Smith (1998) heterogeneous-agent model (Section 3, note.md).
     
-    # Preferences
-    gamma: float = 1.0  # Risk aversion
-    beta: float = 0.96  # Discount factor
+    The model features:
+    - Identical agents with CRRA preferences
+    - Idiosyncratic productivity shocks (AR(1))
+    - Aggregate TFP shocks (AR(1))
+    - Cobb-Douglas production
+    - Competitive equilibrium pricing
     
-    # Production
-    alpha: float = 0.36  # Capital share
-    delta: float = 0.08  # Depreciation rate
+    Attributes:
+        gamma: Risk aversion coefficient (log utility when gamma=1.0)
+        beta: Discount factor
+        alpha: Capital share in Cobb-Douglas production
+        delta: Capital depreciation rate
+        rho_y: Persistence of idiosyncratic log-productivity
+        sigma_y: Volatility of idiosyncratic shocks (adjusted for stationarity)
+        rho_z: Persistence of aggregate log-TFP
+        sigma_z: Volatility of aggregate shocks
+        num_agents: Number of agents in simulation
+        horizon: Evaluation time horizon
+        enforce_bounds: If True, clip policy outputs to enforce feasibility
+        use_log_shock_shift: If True, apply mean shift to log shocks
+    """
     
-    # Idiosyncratic process
-    rho_y: float = 0.9  # Persistence
-    sigma_y: float = 0.2 * np.sqrt(1.0 - 0.9**2)  # Volatility (adjusted)
-    
-    # Aggregate process
-    rho_z: float = 0.95  # Persistence of log TFP
-    sigma_z: float = 0.01  # Volatility of log TFP
-    
-    # Number of agents
+    gamma: float = 1.0
+    beta: float = 0.96
+    alpha: float = 0.36
+    delta: float = 0.08
+    rho_y: float = 0.9
+    sigma_y: float = 0.2 * np.sqrt(1.0 - 0.9**2)
+    rho_z: float = 0.95
+    sigma_z: float = 0.01
     num_agents: int = 1000
-    
-    # Simulation
     horizon: int = 100
-
-    # Replication switches (Main_KS.ipynb alignment)
     enforce_bounds: bool = True
     use_log_shock_shift: bool = True
     
-    def __post_init__(self):
-        """Validate parameters."""
+    def __post_init__(self) -> None:
+        """Validate parameter ranges."""
         assert 0 < self.beta < 1, f"beta must be in (0,1), got {self.beta}"
         assert 0 < self.alpha < 1, f"alpha must be in (0,1), got {self.alpha}"
         assert 0 < self.delta < 1, f"delta must be in (0,1), got {self.delta}"
@@ -55,25 +65,44 @@ class KrusellSmithParams:
 
 class KrusellSmithModel:
     """
-    Krusell-Smith heterogeneous-agent economy model.
+    Krusell-Smith (1998) heterogeneous-agent economy model (Section 3, note.md).
     
-    Agents maximize:
-        E_0 [sum_t beta^t u(c_t^i)]
+    Models a competitive economy with ℓ identical agents and aggregate shocks:
     
+    Agent problem:
+        max E_0 [Σ_t β^t u(c_t^i)]
     subject to:
         w_{t+1}^i = R_{t+1}(w_t^i - c_t^i) + W_{t+1} exp(y_{t+1}^i)
-        0 <= c_t^i <= w_t^i
+        0 ≤ c_t^i ≤ w_t^i
+    where w_t^i is cash-on-hand and y_t^i is idiosyncratic log-productivity.
+    
+    Production (Cobb-Douglas):
+        Y_t = z_t K_t^α [Σ_i exp(y_t^i)]^(1-α)
+    
+    Equilibrium prices:
+        R_t = 1 - δ + α z_t k_t^(α-1) [Σ_i exp(y_t^i)]^(1-α)
+        W_t = (1-α) z_t K_t^α [Σ_i exp(y_t^i)]^(-α)
+    where K_t = Σ_i k_t^i and z_t is aggregate log-TFP.
     """
     
-    def __init__(self, params: KrusellSmithParams):
-        """Initialize the model."""
+    def __init__(self, params: KrusellSmithParams) -> None:
+        """
+        Initialize Krusell-Smith model.
+        
+        Precomputes steady-state bounds and mean shifts for shock processes.
+        
+        Args:
+            params: KrusellSmithParams instance.
+        """
         self.params = params
+        # Compute bounds for log shocks (at ±2 std devs)
         self._y_log_bounds = self._log_bounds(
             self.params.sigma_y, self.params.rho_y
         )
         self._z_log_bounds = self._log_bounds(
             self.params.sigma_z, self.params.rho_z
         )
+        # Compute mean shifts to keep E[exp(shock)] near 1
         self._y_log_shift = self._log_shock_mean_shift(
             self.params.sigma_y, self.params.rho_y
         )
@@ -83,23 +112,56 @@ class KrusellSmithModel:
 
     @staticmethod
     def _log_bounds(sigma: float, rho: float) -> Tuple[float, float]:
-        """Bounds for log shocks at +/- 2 std devs of stationary dist."""
+        """
+        Compute bounds for log shocks at ±2 standard deviations.
+        
+        For the stationary distribution of AR(1) log-shocks:
+            z_{t+1} = ρ·z_t + σ·ε_t
+        the unconditional variance is σ²/(1-ρ²).
+        This function returns bounds at ±2√[σ²/(1-ρ²)].
+        
+        Args:
+            sigma: Volatility parameter σ.
+            rho: Persistence parameter ρ.
+        
+        Returns:
+            Tuple (lower_bound, upper_bound) for log shocks.
+        """
         denom = max(1e-12, np.sqrt(1.0 - rho**2))
         bound = 2.0 * sigma / denom
         return -bound, bound
 
     @staticmethod
     def _log_shock_mean_shift(sigma: float, rho: float) -> float:
-        """Mean shift so E[exp(log shock)] is near 1 in steady state."""
+        """
+        Compute mean shift for log shocks.
+        
+        Adjusts the intercept so that E[exp(log_shock)] ≈ 1.
+        This ensures that productivity shocks don't systematically
+        inflate or deflate the economy.
+        
+        Args:
+            sigma: Volatility parameter σ.
+            rho: Persistence parameter ρ.
+        
+        Returns:
+            Mean shift value to add to shocks.
+        """
         denom = max(1e-12, 1.0 - rho**2)
         return (-0.5 * (1.0 - rho) * sigma**2) / denom
     
     def utility(self, c: np.ndarray) -> np.ndarray:
         """
-        CRRA utility function.
+        Compute CRRA utility.
         
-        u(c) = (c^(1-gamma) - 1) / (1 - gamma)
-        Special case: u(c) = log(c) when gamma = 1
+        Utility function: u(c) = (c^(1-γ) - 1) / (1 - γ)
+        Special case: u(c) = log(c) when γ = 1.0
+        
+        Args:
+            c: Consumption array of any shape.
+        
+        Returns:
+            Utility array with same shape.
         """
         gamma = self.params.gamma
         if abs(gamma - 1.0) < 1e-10:
@@ -109,7 +171,15 @@ class KrusellSmithModel:
     
     def utility_derivative(self, c: np.ndarray) -> np.ndarray:
         """
-        Marginal utility: u'(c) = c^(-gamma)
+        Compute marginal utility.
+        
+        Marginal utility: u'(c) = c^(-γ)
+        
+        Args:
+            c: Consumption array of any shape.
+        
+        Returns:
+            Marginal utility array with same shape.
         """
         return c**(-self.params.gamma)
     
@@ -119,16 +189,17 @@ class KrusellSmithModel:
         eps_t: np.ndarray
     ) -> np.ndarray:
         """
-        Idiosyncratic productivity process.
+        Update idiosyncratic productivity via AR(1) process.
         
-        y_{t+1}^i = rho_y * y_t^i + sigma_y * eps_t^i
+        Idiosyncratic process: y_{t+1}^i = ρ_y·y_t^i + σ_y·ε_t^i + shift
+        where shift is applied if use_log_shock_shift=True.
         
         Args:
-            y_t: current log-productivity (num_agents,)
-            eps_t: shocks N(0,1) (num_agents,)
-            
+            y_t: Current log-productivity, shape (num_agents,).
+            eps_t: Standard normal shocks, shape (num_agents,).
+        
         Returns:
-            y_{t+1}: next productivity (num_agents,)
+            Next-period log-productivity y_{t+1}, shape (num_agents,).
         """
         shift = self._y_log_shift if self.params.use_log_shock_shift else 0.0
         return self.params.rho_y * y_t + self.params.sigma_y * eps_t + shift
@@ -139,16 +210,17 @@ class KrusellSmithModel:
         eps_z_t: float
     ) -> float:
         """
-        Aggregate productivity process.
+        Update aggregate productivity via AR(1) process.
         
-        z_{t+1} = rho_z * z_t + sigma_z * eps_z_t
+        Aggregate process: z_{t+1} = ρ_z·z_t + σ_z·ε_z_t + shift
+        where shift is applied if use_log_shock_shift=True.
         
         Args:
-            z_t: current log TFP
-            eps_z_t: aggregate shock N(0,1)
-            
+            z_t: Current log-TFP.
+            eps_z_t: Standard normal aggregate shock.
+        
         Returns:
-            z_{t+1}: next log TFP
+            Next-period log-TFP z_{t+1}.
         """
         shift = self._z_log_shift if self.params.use_log_shock_shift else 0.0
         z_next = self.params.rho_z * z_t + self.params.sigma_z * eps_z_t + shift

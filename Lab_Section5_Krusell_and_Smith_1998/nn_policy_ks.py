@@ -15,15 +15,17 @@ from typing import Tuple, Dict
 
 class KSNeuralNetworkPolicy(nn.Module):
     """
-    Neural network policy for heterogeneous-agent model.
+    Neural Network Policy for Krusell-Smith Model (Section 3.2, note.md).
     
-    Inputs: [y_i, w_i, z, D_t]
-    where D_t = concatenation of all agents' (y, w) at time t
+    Parameterizes policy functions for heterogeneous agents with distribution features:
+    - Consumption share: phi(y_i, w_i, z, D_t; theta) in [0,1]
+    - Lagrange multiplier: h(y_i, w_i, z, D_t; theta) >= 0
+    - Value function: V(y_i, w_i, z, D_t; theta) unrestricted
     
-    Outputs:
-    - consumption share phi in [0,1]
-    - multiplier h >= 0
-    - value function V
+    Input concatenation:
+        [y^i, w^i, z, D_t] where D_t = flattened distribution of agent states
+    
+    Three output heads with sigmoid, exponential, and linear activations respectively.
     """
     
     def __init__(
@@ -32,32 +34,33 @@ class KSNeuralNetworkPolicy(nn.Module):
         hidden_size: int = 64,
         init_intercept_zero: bool = True,
         phi_steady: float | None = None
-    ):
-    
+    ) -> None:
         """
-        Initialize KS policy network.
+        Initialize the Krusell-Smith policy network.
         
         Args:
-            hidden_size: neurons per hidden layer
-            distribution_features: length of D_t vector (2 * num_agents)
-            init_intercept_zero: initialize intercepts to zero
+            distribution_features: Dimension of distribution features D_t (typically 2*num_agents).
+            hidden_size: Number of neurons per hidden layer.
+            init_intercept_zero: If True, initialize intercepts to zero.
+            phi_steady: Optional steady-state consumption share for initialization.
         """
         super().__init__()
         
         self.hidden_size = hidden_size
         self.distribution_features = distribution_features
         
-        # Input dimension: [y, w, z, dist_features] = 2 + 1 + dist_features
+        # Total input dimension: individual state [y, w, z] + distribution features
         input_dim = 3 + distribution_features
         
-        # Activation (paper baseline: sigmoid)
+        # Activation function (per paper baseline)
         self.activation = torch.sigmoid
         
-        # Shared core: 2 hidden layers
+        # ===== Shared core: 2 hidden layers =====
         self.fc1 = nn.Linear(input_dim, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
         
-        # Output heads
+        # ===== Output heads =====
+        # Head 1: Consumption share phi(.) = sigmoid(zeta_0 + eta(...))
         self.phi_intercept = nn.Parameter(torch.zeros(1), requires_grad=False)
         phi_shift = 0.0 if phi_steady is None else self._logit(phi_steady)
         self.register_buffer(
@@ -66,25 +69,36 @@ class KSNeuralNetworkPolicy(nn.Module):
         )
         self.phi_output = nn.Linear(hidden_size, 1)
         
+        # Head 2: Multiplier h(.) = exp(zeta_0 + eta(...))
         self.h_intercept = nn.Parameter(torch.zeros(1))
         self.h_output = nn.Linear(hidden_size, 1)
         
+        # Head 3: Value V(.) = zeta_0 + eta(...)
         self.v_intercept = nn.Parameter(torch.zeros(1))
         self.v_output = nn.Linear(hidden_size, 1)
         
-        # Initialize weights
+        # Initialize network parameters
         self._initialize_weights(init_intercept_zero)
     
-    def _initialize_weights(self, init_intercept_zero: bool = True):
-        """Initialize using He and Glorot distributions."""
+    def _initialize_weights(self, init_intercept_zero: bool = True) -> None:
+        """
+        Initialize network weights and biases.
+        
+        Per Maliar et al. (2021):
+        - Weights: Glorot Uniform (Xavier) initialization
+        - Biases: He Uniform initialization
+        - Intercepts: zero if init_intercept_zero=True
+        
+        Args:
+            init_intercept_zero: If True, initialize intercepts to zero.
+        """
         for layer in [self.fc1, self.fc2, self.phi_output,
                       self.h_output, self.v_output]:
             nn.init.xavier_uniform_(layer.weight)
             if layer.bias is not None:
                 fan_in = layer.weight.shape[1]
-                nn.init.uniform_(layer.bias,
-                                -np.sqrt(2/fan_in),
-                                np.sqrt(2/fan_in))
+                bound = np.sqrt(2.0 / fan_in)
+                nn.init.uniform_(layer.bias, -bound, bound)
         
         if init_intercept_zero:
             nn.init.zeros_(self.phi_intercept)
@@ -93,7 +107,17 @@ class KSNeuralNetworkPolicy(nn.Module):
 
     @staticmethod
     def _logit(prob: float) -> float:
-        """Stable logit for probability inputs."""
+        """
+        Compute stable logit (log-odds) for probability inputs.
+        
+        logit(p) = log(p/(1-p))
+        
+        Args:
+            prob: Probability value in (0, 1).
+        
+        Returns:
+            Log-odds value.
+        """
         p = min(max(prob, 1e-6), 1.0 - 1e-6)
         return float(np.log(p / (1.0 - p)))
     
@@ -105,16 +129,19 @@ class KSNeuralNetworkPolicy(nn.Module):
         dist_features: torch.Tensor
     ) -> torch.Tensor:
         """
-        Forward pass through shared core.
+        Forward pass through shared neural network core.
+        
+        Concatenates [y, w, z, D_t] and passes through two hidden layers
+        with sigmoid activation to produce eta(y,w,z,D_t;vartheta).
         
         Args:
-            y: idiosyncratic productivity (batch_size,)
-            w: cash-on-hand (batch_size,)
-            z: aggregate productivity (batch_size,)
-            dist_features: distribution features (batch_size, dist_features)
-            
+            y: Idiosyncratic log-productivity, shape (batch_size,).
+            w: Cash-on-hand, shape (batch_size,).
+            z: Aggregate log-TFP, shape (batch_size,).
+            dist_features: Distribution features D_t, shape (batch_size, dist_features).
+        
         Returns:
-            eta: shared network output (batch_size, hidden_size)
+            eta: Shared network output, shape (batch_size, hidden_size).
         """
         x = torch.cat([y.unsqueeze(-1), w.unsqueeze(-1),
                        z.unsqueeze(-1), dist_features], dim=-1)
@@ -130,9 +157,19 @@ class KSNeuralNetworkPolicy(nn.Module):
         dist_features: torch.Tensor
     ) -> torch.Tensor:
         """
-        Consumption share: phi in [0,1].
+        Compute consumption share phi(y,w,z,D_t;theta) in [0,1].
         
-        phi = sigmoid(zeta_0 + eta(...))
+        Parameterization: phi = sigmoid(zeta_0 + eta(y,w,z,D_t;vartheta))
+        Applied to determine consumption: c = w * phi, respecting borrowing constraint.
+        
+        Args:
+            y: Idiosyncratic log-productivity, shape (batch_size,).
+            w: Cash-on-hand, shape (batch_size,).
+            z: Aggregate log-TFP, shape (batch_size,).
+            dist_features: Distribution features, shape (batch_size, dist_features).
+        
+        Returns:
+            Consumption share phi, shape (batch_size,), values in [0,1].
         """
         eta = self.forward_shared(y, w, z, dist_features)
         logit = (
@@ -150,9 +187,20 @@ class KSNeuralNetworkPolicy(nn.Module):
         dist_features: torch.Tensor
     ) -> torch.Tensor:
         """
-        Multiplier: h >= 0.
+        Compute Lagrange multiplier h(y,w,z,D_t;theta) >= 0 for borrowing constraint.
         
-        h = exp(zeta_0 + eta(...))
+        Parameterization: h = exp(zeta_1 + eta(y,w,z,D_t;vartheta))
+        Non-negativity enforced by exponential transformation. For interior solutions,
+        h=0 (constraint inactive); for boundary solutions, h>0 (constraint binds).
+        
+        Args:
+            y: Idiosyncratic log-productivity, shape (batch_size,).
+            w: Cash-on-hand, shape (batch_size,).
+            z: Aggregate log-TFP, shape (batch_size,).
+            dist_features: Distribution features, shape (batch_size, dist_features).
+        
+        Returns:
+            Lagrange multiplier h >= 0, shape (batch_size,).
         """
         eta = self.forward_shared(y, w, z, dist_features)
         log_h = self.h_intercept + self.h_output(eta).squeeze(-1)
@@ -166,9 +214,21 @@ class KSNeuralNetworkPolicy(nn.Module):
         dist_features: torch.Tensor
     ) -> torch.Tensor:
         """
-        Value function: V unrestricted.
+        Compute value function approximation V(y,w,z,D_t;theta).
         
-        V = zeta_0 + eta(...)
+        Parameterization: V = zeta_2 + eta(y,w,z,D_t;vartheta)
+        Unrestricted output used to approximate the true value function.
+        Employed in Bellman objective (Eq. 32) for computing value derivatives
+        via finite difference.
+        
+        Args:
+            y: Idiosyncratic log-productivity, shape (batch_size,).
+            w: Cash-on-hand, shape (batch_size,).
+            z: Aggregate log-TFP, shape (batch_size,).
+            dist_features: Distribution features, shape (batch_size, dist_features).
+        
+        Returns:
+            Value function approximation V, shape (batch_size,), unrestricted.
         """
         eta = self.forward_shared(y, w, z, dist_features)
         return self.v_intercept + self.v_output(eta).squeeze(-1)
@@ -180,7 +240,21 @@ class KSNeuralNetworkPolicy(nn.Module):
         z: torch.Tensor,
         dist_features: torch.Tensor
     ) -> torch.Tensor:
-        """Get consumption from policy: c = w * phi."""
+        """
+        Compute optimal consumption c(y,w,z,D_t;theta) satisfying borrowing constraint.
+        
+        Formula: c = w * phi(y,w,z,D_t;theta) where phi in [0,1]
+        This parameterization ensures 0 <= c <= w, respecting the borrowing constraint w >= 0.
+        
+        Args:
+            y: Idiosyncratic log-productivity, shape (batch_size,).
+            w: Cash-on-hand, shape (batch_size,).
+            z: Aggregate log-TFP, shape (batch_size,).
+            dist_features: Distribution features, shape (batch_size, dist_features).
+        
+        Returns:
+            Optimal consumption c, shape (batch_size,).
+        """
         phi = self.forward_phi(y, w, z, dist_features)
         return w * phi
     
@@ -192,7 +266,26 @@ class KSNeuralNetworkPolicy(nn.Module):
         dist_features: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Get all outputs: (c, phi, h, V).
+        Compute all policy outputs in one forward pass.
+        
+        Returns all four key objects needed by training objectives:
+        - Consumption c: respects borrowing constraint via phi in [0,1]
+        - Consumption share phi: auxiliary output for multiplicative parameterization
+        - Multiplier h: Lagrange multiplier for constraint (h=0 if unconstrained, h>0 if binding)
+        - Value V: value function approximation for Bellman equation training
+        
+        Args:
+            y: Idiosyncratic log-productivity, shape (batch_size,).
+            w: Cash-on-hand, shape (batch_size,).
+            z: Aggregate log-TFP, shape (batch_size,).
+            dist_features: Distribution features D_t, shape (batch_size, dist_features).
+        
+        Returns:
+            Tuple of (c, phi, h, V):
+            - c: Consumption, shape (batch_size,)
+            - phi: Consumption share, shape (batch_size,)
+            - h: Lagrange multiplier, shape (batch_size,)
+            - V: Value approximation, shape (batch_size,)
         """
         phi = self.forward_phi(y, w, z, dist_features)
         h = self.forward_h(y, w, z, dist_features)
@@ -206,18 +299,39 @@ class KSNeuralNetworkPolicy(nn.Module):
         y: np.ndarray
     ) -> np.ndarray:
         """
-        Build the full distribution vector D_t = [y_1..y_n, w_1..w_n].
+        Build the distribution vector D_t = [y_1,...,y_n, w_1,...,w_n].
+        
+        This concatenates the idiosyncratic state variables for all agents to form
+        distribution features passed to the neural network. Used for heterogeneous-agent
+        policy computation and AiO operator implementation.
+        
+        Args:
+            w: Cash-on-hand across agents, shape (n_agents,).
+            y: Idiosyncratic log-productivity across agents, shape (n_agents,).
+        
+        Returns:
+            Distribution vector D_t, shape (2*n_agents,).
         """
         return np.concatenate([y, w], axis=0)
     
     @property
     def total_params(self) -> int:
-        """Total number of trainable parameters."""
+        """
+        Total number of trainable parameters in the network.
+        
+        Returns:
+            Sum of parameter counts across all neural network layers.
+        """
         return sum(p.numel() for p in self.parameters())
 
 
 class KSPolicyFactory:
-    """Factory for creating KS policy networks."""
+    """
+    Factory class for creating Krusell-Smith policy networks.
+    
+    Provides a convenient interface for instantiating policy networks with
+    appropriate dimensionality based on model parameters (number of agents).
+    """
     
     @staticmethod
     def create_policy(
@@ -227,15 +341,27 @@ class KSPolicyFactory:
         phi_steady: float | None = None
     ) -> KSNeuralNetworkPolicy:
         """
-        Create a KS policy network.
+        Create a Krusell-Smith policy network with specified configuration.
+        
+        The distribution features dimension is set to 2*num_agents, reflecting
+        the concatenation of all agents' productivity and cash-on-hand variables
+        to form D_t = [y_1,...,y_n, w_1,...,w_n].
         
         Args:
-            hidden_size: neurons per hidden layer
-            num_agents: number of agents in the economy
-            device: 'cpu' or 'cuda'
-            
+            hidden_size: Number of neurons in each hidden layer of shared core network.
+                Default: 64.
+            num_agents: Number of heterogeneous agents in the economy.
+                Used to determine distribution_features = 2*num_agents.
+                Default: 1000.
+            device: Computing device ('cpu' or 'cuda').
+                Default: 'cpu'.
+            phi_steady: Steady-state consumption share for initialization of phi output.
+                If None, initialized from Glorot distribution.
+                Default: None.
+        
         Returns:
-            policy network
+            KSNeuralNetworkPolicy: Policy network configured for heterogeneous-agent
+                training with distribution features matching num_agents.
         """
         policy = KSNeuralNetworkPolicy(
             hidden_size=hidden_size,

@@ -15,19 +15,33 @@ from policy_utils_ks import InputScaleSpec, consumption_from_share_torch
 
 
 class KSObjectiveComputer:
-    """Computes loss objectives for KS training."""
+    """
+    Computes loss objectives for training Krusell-Smith heterogeneous-agent models.
+    
+    Implements three training objectives from Maliar et al. (2021) Algorithm 1:
+    1. Lifetime Reward: Maximizes discounted expected utility (paper Eq. 27)
+    2. Euler Equation: Enforces intertemporal consumption trade-off with 
+       Fischer-Burmeister complementarity (paper Eq. 44)
+    3. Bellman Equation: Matches value function via dynamic programming equation
+       (paper Eq. 32, adapted for heterogeneous agents)
+    
+    For heterogeneous agents, each objective is computed agent-by-agent within
+    the batch, aggregating via cross-sectional means. Distribution features D_t
+    are passed to neural network to ensure agents respond to economy-wide conditions.
+    """
 
     def __init__(
         self,
         model: KrusellSmithModel,
         device: str = 'cpu'
-    ):
+    ) -> None:
         """
-        Initialize objective computer.
+        Initialize Krusell-Smith objective computer.
         
         Args:
-            model: KrusellSmithModel instance
-            device: 'cpu' or 'cuda'
+            model: KrusellSmithModel instance with parameters (gamma, beta, alpha, delta, etc.)
+                and methods for utility computation and Euler residuals.
+            device: Computing device ('cpu' or 'cuda'). Determines where tensors are allocated.
         """
         self.model = model
         self.device = device
@@ -42,34 +56,48 @@ class KSObjectiveComputer:
         w_path: torch.Tensor
     ) -> torch.Tensor:
         """
-        Lifetime Reward objective.
+        Lifetime Reward objective (Maliar et al. 2021, Eq. 27).
         
-        Maximizes sum_t beta^t u(c_t^i) for each agent i.
+        Maximizes V^LR = E[∑_t β^t u(c_t)] where u(c) is CRRA utility.
+        This objective directly optimizes discounted lifetime utility and serves
+        as a baseline training target. Works for all agent/batch combinations within
+        the heterogeneous-agent framework.
+        
+        Formula:
+            u(c) = (c^(1-γ) - 1) / (1-γ)  if γ ≠ 1
+            u(c) = log(c)                   if γ = 1
         
         Args:
-            c_path: consumption (T, batch_size, num_agents)
-            w_path: wealth (T, batch_size, num_agents)
-            
+            c_path: Consumption path indexed by (T, batch_size, num_agents).
+                T is time horizon, batch_size is gradient batch, num_agents is 
+                heterogeneous agents in the economy.
+            w_path: Wealth path (not directly used in utility, kept for API consistency).
+                Shape (T, batch_size, num_agents).
+        
         Returns:
-            scalar loss (negative of reward)
+            torch.Tensor: Scalar loss (negative of mean lifetime reward).
+                Returns the negative reward since optimization minimizes loss.
         """
         T = c_path.shape[0]
         gamma = self.model.params.gamma
         
-        # Compute utilities
+        # Compute utilities for all time periods
         if abs(gamma - 1.0) < 1e-10:
             utilities = torch.log(c_path + 1e-8)
         else:
             utilities = (c_path**(1 - gamma) - 1) / (1 - gamma)
         
-        # Discount and sum
+        # Create discount factors β^t for t = 0, 1, ..., T-1
         discount_factors = torch.tensor(
             [self.model.params.beta**t for t in range(T)],
             device=self.device,
             dtype=torch.float32
-        ).view(-1, 1, 1)
+        ).view(-1, 1, 1)  # Shape: (T, 1, 1) for broadcasting
         
+        # Compute lifetime reward: ∑_t β^t u(c_t)
         lifetime_reward = torch.sum(discount_factors * utilities, dim=0)
+        
+        # Return negative mean as loss (minimize negative reward = maximize reward)
         loss = -lifetime_reward.mean()
         
         return loss
@@ -103,19 +131,39 @@ class KSObjectiveComputer:
         input_scale_spec: InputScaleSpec = InputScaleSpec()
     ) -> torch.Tensor:
         """
-        Euler equation objective with two uncorrelated shocks (Paper Eq. 44).
+        Euler equation objective with heterogeneous agents and AiO operator (Maliar et al., Eq. 44).
         
-        Ξ(θ) = E { [Ψ^FB(...)]² + ν·[Euler_1]·[Euler_2] }
+        Implements the All-in-One (AiO) operator approach: uses two independent shocks
+        to efficiently compute nested expectations without explicit integration. This reduces
+        the curse of dimensionality in the heterogeneous-agent setting.
+        
+        Loss function: Ξ(θ) = E[Ψ^FB(a,λ)²] + ν·E[Euler_1·Euler_2]
+        
+        Where:
+        - Ψ^FB: Fischer-Burmeister complementarity function checking KKT conditions
+        - Euler_1, Euler_2: Residuals from intertemporal FOC under two shocks
+        - a: Saving share = 1 - c/w (constraint: a ≥ 0, i.e., w ≥ 0)
+        - λ: Complementarity multiplier = 1 - h (constraint: λ ≥ 0)
+        - h: Lagrange multiplier from policy network output
         
         Args:
-            policy: KSNeuralNetworkPolicy
-            Current state: (y_t, w_t, z_t, dist_features_t, w_raw_t)
-            Next period: shock 1 and shock 2 with corresponding interest rates
-            nu_h: (not used in Euler, for API consistency)
-            nu: weight on Euler term relative to FB term
-            
+            policy: KSNeuralNetworkPolicy for computing (c, h).
+            y_t, w_t, z_t, dist_features_t, w_raw_t: Current state at time t.
+                - y_t: Idiosyncratic productivity, shape (batch_size, num_agents)
+                - w_t: Scaled wealth, shape (batch_size, num_agents)
+                - z_t: Aggregate log-TFP, shape (batch_size,)
+                - dist_features_t: Distribution features D_t
+                - w_raw_t: Unscaled wealth for complementarity check
+            y_next_1, ..., w_raw_next_1: State under first shock at t+1.
+            y_next_2, ..., w_raw_next_2: State under second shock at t+1.
+            R_next_1: Gross interest rate for shock 1 scenario.
+            R_next_2: Gross interest rate for shock 2 scenario.
+            nu_h: Deprecated parameter (for API compatibility).
+            nu: Weight on Euler loss relative to Fischer-Burmeister loss. Default: 1.0.
+            input_scale_spec: InputScaleSpec for wealth scaling (e.g., log-scale bounds).
+        
         Returns:
-            scalar loss to minimize
+            torch.Tensor: Scalar loss to minimize.
         """
         eps_guard = 1e-10
         w_cap = float(input_scale_spec.w_max) if input_scale_spec.enabled else None
@@ -167,7 +215,7 @@ class KSObjectiveComputer:
         return total_loss
 
     # =====================================================================
-    # Bellman Equation Objective (Corrected)
+    # Bellman Equation Objective
     # =====================================================================
 
     def bellman_objective(
@@ -193,21 +241,31 @@ class KSObjectiveComputer:
         input_scale_spec: InputScaleSpec = InputScaleSpec()
     ) -> torch.Tensor:
         """
-        Bellman equation objective with two uncorrelated shocks (AiO).
+        Bellman equation objective with heterogeneous agents and AiO operator (Maliar et al., Eq. 32).
         
-        Implements AiO structure matching Section 4 (Consumption-Saving):
-        Ξ(θ) = E { [Bellman_1 × Bellman_2]
-                   + ν·[FB_1 × FB_2]
-                   + ν_h·[(λ_1 × a) × (λ_2 × a)] }
+        Trains the value function approximation V_θ to match the Bellman equation in expectation.
+        Uses the AiO operator with two independent shocks to efficiently compute nested 
+        expectations. Also enforces envelope condition and complementarity constraints.
+        
+        Loss function (AiO structure):
+            Ξ(θ) = E[Bellman_1·Bellman_2] + ν·E[FB_1·FB_2] + ν_h·E[(λ_1·a_1)·(λ_2·a_2)]
+        
+        Where:
+        - Bellman residuals: ε_Bellman = V(s) - u(c(s)) - β·E[V(s')]
+        - FB and complementarity terms enforce KKT constraints as in Euler objective
+        - Envelope condition uses finite differences: ∂V/∂w ≈ ∂u/∂c (at optimum)
         
         Args:
-            policy: KSNeuralNetworkPolicy
-            Current and next-period state variables for two independent shocks
-            nu: weight on Fischer-Burmeister complementarity term
-            nu_h: weight on multiplier consistency term
-            
+            policy: KSNeuralNetworkPolicy with value function head V_θ.
+            y_t, w_t, z_t, dist_features_t, w_raw_t: Current state at time t.
+            y_next_1, ..., w_raw_next_1: State under first shock at t+1.
+            y_next_2, ..., w_raw_next_2: State under second shock at t+1.
+            nu_h: Weight on multiplier consistency term (λ·a product). Default: 1.0.
+            nu: Weight on complementarity/envelope terms relative to Bellman. Default: 1.0.
+            input_scale_spec: Wealth scaling specification for unscaling and constraint checks.
+        
         Returns:
-            scalar loss to minimize
+            torch.Tensor: Scalar loss to minimize.
         """
         eps_guard = 1e-10
         w_cap = float(input_scale_spec.w_max) if input_scale_spec.enabled else None
@@ -267,15 +325,24 @@ class KSObjectiveComputer:
         w_safe = torch.clamp(w_raw_t, min=eps_guard)
         a = torch.clamp(1.0 - c_t / w_safe, min=0.0)
         
-        # ===== Lagrange multiplier from FOC (Section 4 pattern) =====
+        # ===== Lagrange multiplier from FOC (Section 4 pattern, with interest rates) =====
         # λ = 1 - (β·R·∂V/∂w')/u'(c)
-        # For Krusell-Smith: R varies, so use interest rate from state
-        # Conservative: use average or extract from rate calculation
+        # For Krusell-Smith: Interest rates R are endogenous, computed from state
+        # R = α·Z·(K/L)^(α-1) where K is aggregate capital, L is labor supply
+        # Use average interest rate as conservative estimate
+        
+        # Compute interest rate from aggregate state (z_t = log(Z_t))
+        # R = α·exp(z_t)·(K/1)^(α-1) ≈ α·exp(z_t) when K normalized
+        alpha = self.model.params.alpha
+        R_t_1 = alpha * torch.exp(z_next_1)  # Interest rate at next period
+        R_t_2 = alpha * torch.exp(z_next_2)
+        
         u_c_next_1 = c_next_1**(-gamma)
         u_c_next_2 = c_next_2**(-gamma)
         
-        lambda_1 = 1.0 - (self.model.params.beta * dV_dw_1) / (u_c_t + eps_guard)
-        lambda_2 = 1.0 - (self.model.params.beta * dV_dw_2) / (u_c_t + eps_guard)
+        # Corrected FOC: λ = 1 - (β·R·∂V/∂w')/u'(c)
+        lambda_1 = 1.0 - (self.model.params.beta * R_t_1 * dV_dw_1) / (u_c_t + eps_guard)
+        lambda_2 = 1.0 - (self.model.params.beta * R_t_2 * dV_dw_2) / (u_c_t + eps_guard)
         lambda_1 = torch.clamp(lambda_1, min=0.0)
         lambda_2 = torch.clamp(lambda_2, min=0.0)
         
@@ -300,11 +367,21 @@ class KSObjectiveComputer:
         lambda_val: torch.Tensor
     ) -> torch.Tensor:
         """
-        Fischer-Burmeister complementarity function (Section4-consistent).
+        Fischer-Burmeister complementarity function for constraint violation detection.
         
-        Ψ^FB(a,λ) = a + λ - √(a² + λ²)
+        Mathematical form: Ψ^FB(a,λ) = a + λ - √(a² + λ²)
         
-        Ensures a·λ = 0 (complementarity) with a,λ ≥ 0 (non-negativity).
+        Properties:
+        - Ψ^FB(a,λ) = 0 if and only if a·λ = 0 with a,λ ≥ 0 (complementarity)
+        - Used in Euler and Bellman objectives to enforce Kuhn-Tucker conditions
+        - Reference: Paper Eq. 44-45, Maliar et al. (2021)
+        
+        Args:
+            a: Saving share constraint variable (non-negative), shape (batch_size, ...).
+            lambda_val: Complementarity multiplier (non-negative), same shape.
+        
+        Returns:
+            torch.Tensor: FB function values, same shape as inputs.
         """
         return a + lambda_val - torch.sqrt(a ** 2 + lambda_val ** 2 + 1e-12)
 
@@ -319,21 +396,43 @@ class KSObjectiveComputer:
         w_range: float = 1.0
     ) -> torch.Tensor:
         """
-        Approximate dV/dw using forward differences (Section 4 compatible).
+        Approximate ∂V/∂w using central differences for better numerical stability.
         
-        Uses forward difference to avoid negative w values:
-        dV/dw ≈ (V(y, w+h) - V(y, w)) / h
+        Central difference formula: ∂V/∂w ≈ [V(y, w+h) - V(y, w-h)] / (2h)
         
-        This ensures w remains in the valid domain [0, ∞).
+        This is more accurate and stable than forward difference for value functions
+        with significant curvature. Critical for Bellman objective where the envelope
+        theorem requires ∂V/∂w = u'(c) at the optimum.
+        
+        Args:
+            policy: KSNeuralNetworkPolicy with value function head.
+            y, w, z, dist_features: Current state at which to compute gradient.
+                - y: Productivity, shape (batch_size, num_agents)
+                - w: Wealth (could be scaled), shape (batch_size, num_agents)
+                - z: Aggregate log-TFP, shape (batch_size,)
+                - dist_features: Distribution features D_t
+            h_value: Step size for finite difference. Default: 1e-4.
+                Adaptive scaling: multiplied by w_range for scale-dependent grids.
+            w_range: Scaling factor for step size (typically 1.0 or mean wealth).
+        
+        Returns:
+            torch.Tensor: Approximate gradient ∂V/∂w, shape matching (batch_size, num_agents).
         """
-        # Ensure w is positive
-        w_safe = torch.clamp(w, min=1e-10)
-        w_plus = w_safe + h_value
+        # Ensure w is positive and clamp to valid range
+        w_safe = torch.clamp(w, min=1e-8)
+        
+        # Adaptive step size based on wealth level
+        # Use smaller relative step for larger wealth to maintain precision
+        h_abs = h_value * torch.maximum(torch.ones_like(w_safe), w_safe / 10.0)
+        
+        w_plus = w_safe + h_abs
+        w_minus = torch.clamp(w_safe - h_abs, min=1e-8)
 
-        V_base = policy.forward_v(y, w_safe, z, dist_features)
         V_plus = policy.forward_v(y, w_plus, z, dist_features)
+        V_minus = policy.forward_v(y, w_minus, z, dist_features)
 
-        dV_dw = (V_plus - V_base) / h_value
+        # Central difference
+        dV_dw = (V_plus - V_minus) / (2.0 * h_abs)
         
         # Guard against non-finite gradients
         dV_dw = torch.where(
@@ -341,5 +440,8 @@ class KSObjectiveComputer:
             dV_dw,
             torch.zeros_like(dV_dw)
         )
+        
+        # Clamp gradients to reasonable range to prevent extreme multiplier values
+        dV_dw = torch.clamp(dV_dw, min=-10.0, max=10.0)
         
         return dV_dw

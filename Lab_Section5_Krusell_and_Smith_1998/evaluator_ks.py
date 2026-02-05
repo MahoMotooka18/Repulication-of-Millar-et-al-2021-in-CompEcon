@@ -19,7 +19,20 @@ from policy_utils_ks import (
 
 
 class KSEvaluator:
-    """Evaluation and metrics computation for KS model."""
+    """
+    Evaluation module for Krusell-Smith heterogeneous-agent models.
+    
+    Computes evaluation metrics and summary statistics across entire simulated
+    paths of heterogeneous agents in the economy. Metrics include:
+    - Agent-level satisfaction via lifetime utility
+    - Euler equation residuals (constraint satisfaction and FOC accuracy)
+    - Bellman equation residuals (value function fitting quality)
+    - Cross-sectional statistics (wealth distribution, consumption patterns)
+    - Aggregate consistency (capital-labor equilibrium conditions)
+    
+    Works with both scaled and unscaled wealth inputs, handles non-linear
+    transformations for numerical stability.
+    """
 
     def __init__(
         self,
@@ -27,13 +40,16 @@ class KSEvaluator:
         device: str = 'cpu',
         input_scale_spec: InputScaleSpec = InputScaleSpec(),
         policy_output_type: str = PolicyOutputType.C_SHARE
-    ):
+    ) -> None:
         """
-        Initialize evaluator.
+        Initialize Krusell-Smith evaluator.
         
         Args:
-            model: KrusellSmithModel instance
-            device: 'cpu' or 'cuda'
+            model: KrusellSmithModel instance with parameters and utility function.
+            device: Computing device ('cpu' or 'cuda'). Default: 'cpu'.
+            input_scale_spec: Input scaling specification for wealth transformations
+                (e.g., log-scale with bounds). Default: no scaling.
+            policy_output_type: Type of policy output expected. Default: consumption share.
         """
         self.model = model
         self.device = device
@@ -51,19 +67,42 @@ class KSEvaluator:
         seed: int = 0
     ) -> Dict:
         """
-        Evaluate policy through simulation.
+        Simulate the economy using the learned policy and collect metrics.
+        
+        Performs a forward simulation of T periods where agents make consumption decisions
+        via the policy function, experience idiosyncratic and aggregate shocks, and update
+        their cash-on-hand. Tracks consumption, wealth, capital paths and computes
+        cross-sectional statistics at each period.
+        
+        Simulation loop:
+        1. Agents observe (y_t, w_t, z_t, D_t) and compute c_t = policy(...)
+        2. Income updates: y_t+1 from AR(1) income process
+        3. Wealth evolves: w_t+1 = w_t - c_t + (wage + interest)*h_t + transfers
+        4. Aggregate shocks: z_t+1 from AR(1) TFP process
+        5. Aggregate state: K_t+1 from sum of agent capital, D_t+1 from distribution
         
         Args:
-            policy: neural network policy
-            w_init: initial wealth distribution
-            y_init: initial productivity distribution
-            z_init: initial aggregate productivity
-            K_init: initial aggregate capital
-            T: simulation length
-            seed: random seed
-            
+            policy: KSNeuralNetworkPolicy for computing consumption from states.
+            w_init: Initial wealth distribution across agents, shape (num_agents,).
+            y_init: Initial productivity distribution (log-scale), shape (num_agents,).
+            z_init: Initial aggregate log-TFP.
+            K_init: Initial aggregate capital stock.
+            T: Simulation horizon (number of periods). Default: 1000.
+            seed: Random seed for reproducibility. Default: 0.
+        
         Returns:
-            dict with simulation results
+            Dict: Simulation results including:
+                - 'w_path': Wealth time series, shape (T, num_agents)
+                - 'y_path': Productivity time series, shape (T, num_agents)
+                - 'c_path': Consumption time series, shape (T, num_agents)
+                - 'k_path': Capital (savings) time series, shape (T, num_agents)
+                - 'K_path': Aggregate capital, shape (T,)
+                - 'z_path': Aggregate TFP, shape (T,)
+                - 'Y_path': Aggregate output, shape (T,)
+                - 'R_path': Interest rates, shape (T,)
+                - 'w_mean_path': Mean wealth by period, shape (T,)
+                - 'c_mean_path': Mean consumption by period, shape (T,)
+                - 'gini_wealth': Gini coefficients for wealth distribution, shape (T,)
         """
         rng = np.random.default_rng(seed)
         num_agents = len(w_init)
@@ -196,14 +235,39 @@ class KSEvaluator:
         burn_in: int = 100
     ) -> Dict[str, float]:
         """
-        Compute summary statistics from simulation.
+        Compute summary statistics from simulated paths (Krusell-Smith style).
+        
+        Computes aggregate and distributional statistics over the long run
+        (after burn-in period to allow transient dynamics to dissipate).
+        Includes business cycle statistics, wealth inequality measures,
+        and KS regression coefficients for model validation.
+        
+        Key statistics computed:
+        - Output volatility: std(ln(Y_t))
+        - Output-consumption correlation: corr(Y_t, C_t)
+        - Wealth Gini coefficient: measures inequality [0=perfect equality, 1=perfect inequality]
+        - Wealth distribution shares: fraction held by bottom 40%, top 20%, top 1%
+        - KS regression: ln(K_t+1) = ξ_0 + ξ_1·ln(K_t) + ξ_2·ln(Z_t) + u_t
+          (Model validation: KS steady state coefficient ≈ 0.999)
         
         Args:
-            simulation: output from evaluate_simulation
-            burn_in: number of periods to discard
-            
+            simulation: Output dictionary from evaluate_simulation() containing
+                all simulated paths (w_path, c_path, K_path, Y_path, etc.).
+            burn_in: Number of initial periods to discard (default: 100).
+                Allows economy to converge to ergodic distribution before computing stats.
+        
         Returns:
-            dict with statistics
+            Dict[str, float]: Dictionary of statistics including:
+                - 'Y_std': Standard deviation of log output
+                - 'corr_YC': Correlation between output and consumption
+                - 'gini': Gini coefficient for wealth distribution
+                - 'share_bottom_40': Wealth share of bottom 40% agents
+                - 'share_top_20': Wealth share of top 20% agents
+                - 'share_top_1': Wealth share of top 1% agents
+                - 'ks_coef_K': KS regression coefficient on ln(K_t)
+                - 'ks_coef_Z': KS regression coefficient on ln(Z_t)
+                - 'ks_const': KS regression constant term
+                - 'ks_r2': R² statistic for KS regression fit
         """
         w_path = simulation['w_path'][burn_in:]
         y_path = simulation['y_path'][burn_in:]
@@ -271,14 +335,29 @@ class KSEvaluator:
         burn_in: int = 100
     ) -> Dict[str, np.ndarray]:
         """
-        Compute Euler equation residuals.
+        Compute Euler equation residuals from simulation paths.
+        
+        Evaluates how well the policy satisfies the intertemporal Euler equation:
+        u'(c_t) = β·R_t+1·E[u'(c_t+1)]
+        
+        Residuals measure the FOC error at each agent and period. Small residuals
+        indicate the learned policy closely satisfies economic optimality conditions.
+        
+        Computation:
+        - Residual = u'(c_t) - β·R_t+1·u'(c_t+1)
+        - Marginal utility: u'(c) = c^(-γ) for CRRA utility
         
         Args:
-            simulation: output from evaluate_simulation
-            burn_in: number of periods to discard
-            
+            simulation: Output from evaluate_simulation() containing consumption
+                and interest rate paths.
+            burn_in: Number of periods to discard at start. Default: 100.
+        
         Returns:
-            dict with residuals
+            Dict[str, np.ndarray]: Dictionary containing:
+                - 'residuals': Full Euler residual array, shape (T-burn_in-1, num_agents)
+                - 'residuals_mean': Mean residual across agents, shape (T-burn_in-1,)
+                - 'residuals_std': Std deviation across agents, shape (T-burn_in-1,)
+                - 'residuals_max': Maximum absolute residual per period
         """
         w_path = simulation['w_path'][burn_in:-1]
         c_path = simulation['c_path'][burn_in:-1]
@@ -291,7 +370,7 @@ class KSEvaluator:
         u_c = c_path**(-gamma)
         u_c_next = c_next_path**(-gamma)
         
-        # Euler residual
+        # Euler residual: u'(c_t) - β·R_t+1·u'(c_t+1)
         euler_residual = u_c - (self.model.params.beta *
                                 R_next_path[:, None] * u_c_next)
         
@@ -315,7 +394,24 @@ class KSEvaluator:
         burn_in: int = 100
     ) -> Dict[str, float]:
         """
-        Compute discounted lifetime reward from simulated consumption.
+        Compute discounted lifetime utility from simulated consumption paths.
+        
+        Integrates the discounted utility stream for each agent over the
+        simulation horizon. Provides measure of welfare achieved by the policy.
+        
+        Formula: V_LR = ∑_t β^t·u(c_t) for each agent
+        Then reports cross-sectional mean and percentiles.
+        
+        Args:
+            simulation: Output from evaluate_simulation().
+            burn_in: Periods to discard at start. Default: 100.
+        
+        Returns:
+            Dict[str, float]: Lifetime utility statistics:
+                - 'lifetime_reward_mean': Mean across all agents
+                - 'lifetime_reward_p10': 10th percentile
+                - 'lifetime_reward_p50': 50th percentile (median)
+                - 'lifetime_reward_p90': 90th percentile
         """
         c_path = simulation['c_path'][burn_in:]
         T = c_path.shape[0]
