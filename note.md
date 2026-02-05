@@ -245,7 +245,7 @@ $$
 =E_{(y,w,\varepsilon_1,\varepsilon_2)}\Bigg\{
 \Big[V(y,w;\theta)-u(c)-\beta V(y',w';\theta)\Big]_{\varepsilon=\varepsilon_1}
 \Big[V(y,w;\theta)-u(c)-\beta V(y',w';\theta)\Big]_{\varepsilon=\varepsilon_2}
-+\nu\Big[\Psi^{FB}\!\left(1-\tfrac{c}{w},\,1-h\right)\Big]^2
++\nu\Big[\Psi^{FB} \left(1-\tfrac{c}{w},1-h\right)\Big]^2
 +\nu_h
 \Big[
 \frac{\beta \frac{\partial}{\partial w'}V(y',w';\theta)}{u'(c)}
@@ -436,33 +436,20 @@ $$
 \Xi(\theta)
 &= E_{\omega}[\xi(\omega;\theta)] \\
 &\equiv E_{(Y_t,W_t,z_t,\Sigma_1,\Sigma_2,\varepsilon_1,\varepsilon_2)}
-\Bigg\{
-\Big[
-V(s_t^i;\theta)-u(c_t^i)-\beta V(s_{t+1}^i;\theta)
-\Big]_{\Sigma=\Sigma_1,\varepsilon=\varepsilon_1} \\
-&\qquad \times
-\Big[
-V(s_t^i;\theta)-u(c_t^i)-\beta V(s_{t+1}^i;\theta)
-\Big]_{\Sigma=\Sigma_2,\varepsilon=\varepsilon_2} \\
-&\qquad + \nu
-\Big[
-\Psi^{FB}\!\left(1-\tfrac{c_t^i}{w_t^i},\,1-h_t^i\right)
-\Big]^2 \\
-&\qquad + \nu_h
-\Big[
-\frac{\beta\,\frac{\partial}{\partial w_{t+1}^i}V(s_{t+1}^i;\theta)}
-     {u'(c_t^i)}
-\Big]_{\Sigma=\Sigma_1,\varepsilon=\varepsilon_1}
--h_t^i \\
-&\qquad \times
-\Big[
-\frac{\beta\,\frac{\partial}{\partial w_{t+1}^i}V(s_{t+1}^i;\theta)}
-     {u'(c_t^i)}
-\Big]_{\Sigma=\Sigma_2,\varepsilon=\varepsilon_2}
--h_t^i
-\Bigg\}.
+\left\{
+\begin{aligned}
+&\Big[V(s_t^i;\theta)-u(c_t^i)-\beta V(s_{t+1}^i;\theta)\Big]_{\Sigma_1,\varepsilon_1}
+\Big[V(s_t^i;\theta)-u(c_t^i)-\beta V(s_{t+1}^i;\theta)\Big]_{\Sigma_2,\varepsilon_2} \\
+&+ \nu\Big[\Psi^{FB} \left(1-\tfrac{c_t^i}{w_t^i},1-h_t^i\right)\Big]^2 \\
+&+ \nu_h
+\Big[\tfrac{\beta \partial_{w_{t+1}^i}V(s_{t+1}^i;\theta)}{u'(c_t^i)}\Big]_{\Sigma_1,\varepsilon_1}-h_t^i \\
+&\times
+\Big[\tfrac{\beta \partial_{w_{t+1}^i}V(s_{t+1}^i;\theta)}{u'(c_t^i)}\Big]_{\Sigma_2,\varepsilon_2}-h_t^i
+\end{aligned}
+\right\}.
 \end{aligned}
 $$
+
 
 Here $s_t^i$ denotes the vector of state variables for agent $i$, and all other notation follows (44). In the reported implementation, the value function is pre-trained for an initial block of iterations while holding the consumption and multiplier rules fixed.
 
