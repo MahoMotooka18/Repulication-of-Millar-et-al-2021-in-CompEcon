@@ -241,19 +241,15 @@ $$
 The Bellman method combines the Bellman residual with the maximization conditions, again enforced via the FB function. The multiplier now depends on the value-function derivative $V_w$, so the method approximates $V$, $\varphi$, and $h$. Applying the two-shock AiO construction to the squared residuals yields:
 
 $$
-\Xi(\theta)=E_{\omega}[\xi(\omega;\theta)]
-=E_{(y,w,\varepsilon_1,\varepsilon_2)}\Bigg\{
-\Big[V(y,w;\theta)-u(c)-\beta V(y',w';\theta)\Big]_{\varepsilon=\varepsilon_1}
-\Big[V(y,w;\theta)-u(c)-\beta V(y',w';\theta)\Big]_{\varepsilon=\varepsilon_2}
-+\nu\Big[\Psi^{FB}\!\left(1-\tfrac{c}{w},\,1-h\right)\Big]^2
-+\nu_h
-\Big[
-\frac{\beta \frac{\partial}{\partial w'}V(y',w';\theta)}{u'(c)}
-\Big]_{\varepsilon=\varepsilon_1}-h
-\Big[
-\frac{\beta \frac{\partial}{\partial w'}V(y',w';\theta)}{u'(c)}
-\Big]_{\varepsilon=\varepsilon_2}-h
-\Bigg\}.
+\Xi(\theta)
+=E_{\omega}[\xi(\omega;\theta)]
+=E_{(y,w,\varepsilon_1,\varepsilon_2)}\Big[
+\big(V(y,w;\theta)-u(c)-\beta V(y',w';\theta)\big)_{\varepsilon=\varepsilon_1}
+\big(V(y,w;\theta)-u(c)-\beta V(y',w';\theta)\big)_{\varepsilon=\varepsilon_2}
++\nu\big(\Psi^{FB}(1-\tfrac{c}{w},1-h)\big)^2
++\nu_h\Big(\tfrac{\beta\,\partial_{w'}V(y',w';\theta)_{\varepsilon=\varepsilon_1}}{u'(c)}-h\Big)
+\Big(\tfrac{\beta\,\partial_{w'}V(y',w';\theta)_{\varepsilon=\varepsilon_2}}{u'(c)}-h\Big)
+\Big].
 $$
 
 **Random Draw:**
@@ -432,37 +428,17 @@ The Bellman objective parallels that of 2.2.7 and combines the Bellman residual 
 Using two independent shock draws:
 
 $$
-\begin{aligned}
 \Xi(\theta)
-&= E_{\omega}[\xi(\omega;\theta)] \\
-&\equiv E_{(Y_t,W_t,z_t,\Sigma_1,\Sigma_2,\varepsilon_1,\varepsilon_2)}
-\Bigg\{
-\Big[
-V(s_t^i;\theta)-u(c_t^i)-\beta V(s_{t+1}^i;\theta)
-\Big]_{\Sigma=\Sigma_1,\varepsilon=\varepsilon_1} \\
-&\qquad \times
-\Big[
-V(s_t^i;\theta)-u(c_t^i)-\beta V(s_{t+1}^i;\theta)
-\Big]_{\Sigma=\Sigma_2,\varepsilon=\varepsilon_2} \\
-&\qquad + \nu
-\Big[
-\Psi^{FB}\!\left(1-\tfrac{c_t^i}{w_t^i},\,1-h_t^i\right)
-\Big]^2 \\
-&\qquad + \nu_h
-\Big[
-\frac{\beta\,\frac{\partial}{\partial w_{t+1}^i}V(s_{t+1}^i;\theta)}
-     {u'(c_t^i)}
-\Big]_{\Sigma=\Sigma_1,\varepsilon=\varepsilon_1}
--h_t^i \\
-&\qquad \times
-\Big[
-\frac{\beta\,\frac{\partial}{\partial w_{t+1}^i}V(s_{t+1}^i;\theta)}
-     {u'(c_t^i)}
-\Big]_{\Sigma=\Sigma_2,\varepsilon=\varepsilon_2}
--h_t^i
-\Bigg\}.
-\end{aligned}
+= E_{\omega}[\xi(\omega;\theta)]
+= E_{(Y_t,W_t,z_t,\Sigma_1,\Sigma_2,\varepsilon_1,\varepsilon_2)}\Big[
+\big(V(s_t^i;\theta)-u(c_t^i)-\beta V(s_{t+1}^i;\theta)\big)_{\Sigma_1,\varepsilon_1}
+\big(V(s_t^i;\theta)-u(c_t^i)-\beta V(s_{t+1}^i;\theta)\big)_{\Sigma_2,\varepsilon_2}
++\nu\big(\Psi^{FB}(1-\tfrac{c_t^i}{w_t^i},1-h_t^i)\big)^2
++\nu_h\Big(\tfrac{\beta\,\partial_{w_{t+1}^i}V(s_{t+1}^i;\theta)_{\Sigma_1,\varepsilon_1}}{u'(c_t^i)}-h_t^i\Big)
+\Big(\tfrac{\beta\,\partial_{w_{t+1}^i}V(s_{t+1}^i;\theta)_{\Sigma_2,\varepsilon_2}}{u'(c_t^i)}-h_t^i\Big)
+\Big].
 $$
+
 
 Here $s_t^i$ denotes the vector of state variables for agent $i$, and all other notation follows (44). In the reported implementation, the value function is pre-trained for an initial block of iterations while holding the consumption and multiplier rules fixed.
 
