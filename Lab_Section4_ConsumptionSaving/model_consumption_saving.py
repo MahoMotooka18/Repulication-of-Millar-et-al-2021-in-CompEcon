@@ -12,15 +12,29 @@ from typing import Tuple, Optional
 
 @dataclass
 class ConsumptionSavingParams:
-    """Parameters for the consumption-saving problem."""
-    gamma: float = 2.0  # Risk aversion (CRRA)
-    beta: float = 0.9  # Discount factor
-    r: float = 1.04  # Interest rate
-    rho: float = 0.9  # AR(1) coefficient for income process
-    sigma: float = 0.1  # Std dev of income shocks
-    T: int = 100  # Finite horizon for evaluation
+    """
+    Parameters for the consumption-saving problem (Section 4, Maliar et al. 2021).
     
-    def __post_init__(self):
+    Solves: max E_0 [sum_t beta^t u(c_t)]
+    subject to: w_{t+1} = r(w_t - c_t) + exp(y_t), 0 <= c_t <= w_t
+                y_{t+1} = rho*y_t + sigma*epsilon_t
+    
+    Attributes:
+        gamma: Risk aversion coefficient (CRRA utility parameter)
+        beta: Discount factor in [0, 1)
+        r: Gross interest rate (return on savings)
+        rho: AR(1) coefficient for log-income process
+        sigma: Standard deviation of log-income shocks
+        T: Time horizon for evaluation
+    """
+    gamma: float = 2.0
+    beta: float = 0.9
+    r: float = 1.04
+    rho: float = 0.9
+    sigma: float = 0.1
+    T: int = 100
+    
+    def __post_init__(self) -> None:
         """Validate parameter ranges."""
         assert 0 <= self.beta < 1, f"beta must be in [0,1), got {self.beta}"
         assert 0 < self.r < 1/self.beta, f"r must be in (0, 1/beta), got {self.r}"
@@ -30,31 +44,42 @@ class ConsumptionSavingParams:
 
 class ConsumptionSavingModel:
     """
-    Consumption-Saving model with borrowing constraint.
+    Consumption-Saving model with borrowing constraint (Section 4 of Maliar et al. 2021).
     
-    Solves:
+    Implements the agent's optimization problem:
         max E_0 [sum_t beta^t u(c_t)]
     subject to:
-        0 <= c_t <= w_t
-        w_{t+1} = r(w_t - c_t) + exp(y_t)
-        y_{t+1} = rho*y_t + sigma*epsilon_t, epsilon_t ~ N(0,1)
+        0 <= c_t <= w_t  (borrowing constraint)
+        w_{t+1} = r(w_t - c_t) + exp(y_t)  (budget constraint)
+        y_{t+1} = rho*y_t + sigma*epsilon_t, epsilon_t ~ N(0,1)  (income process)
+    
+    This model is used for three training objectives:
+    1. Lifetime reward maximization
+    2. Euler equation residuals  
+    3. Bellman equation residuals
     """
     
-    def __init__(self, params: ConsumptionSavingParams):
-        """Initialize the model with given parameters."""
+    def __init__(self, params: ConsumptionSavingParams) -> None:
+        """
+        Initialize the consumption-saving model.
+        
+        Args:
+            params: ConsumptionSavingParams instance with model parameters.
+        """
         self.params = params
     
     def utility(self, c: np.ndarray) -> np.ndarray:
         """
-        CRRA utility function.
+        Compute CRRA (Constant Relative Risk Aversion) utility.
         
-        u(c) = (c^(1-gamma) - 1) / (1 - gamma)
+        Utility function: u(c) = (c^(1-gamma) - 1) / (1 - gamma)
+        Special case: u(c) = ln(c) when gamma = 1.0
         
         Args:
-            c: consumption values
-            
+            c: Consumption array of any shape.
+        
         Returns:
-            utility values
+            Utility values with the same shape as input.
         """
         gamma = self.params.gamma
         if gamma == 1.0:
@@ -64,15 +89,15 @@ class ConsumptionSavingModel:
     
     def utility_derivative(self, c: np.ndarray) -> np.ndarray:
         """
-        Marginal utility (derivative of CRRA).
+        Compute marginal utility (first derivative of CRRA).
         
-        u'(c) = c^(-gamma)
+        Marginal utility: u'(c) = c^(-gamma)
         
         Args:
-            c: consumption values
-            
+            c: Consumption array of any shape (must be positive).
+        
         Returns:
-            marginal utility values
+            Marginal utility values with the same shape as input.
         """
         return c**(-self.params.gamma)
     
@@ -83,17 +108,17 @@ class ConsumptionSavingModel:
         y_t: np.ndarray
     ) -> np.ndarray:
         """
-        State transition for cash-on-hand.
+        Compute next-period cash-on-hand via budget constraint.
         
-        w_{t+1} = r(w_t - c_t) + exp(y_t)
+        Budget constraint: w_{t+1} = r(w_t - c_t) + exp(y_t)
         
         Args:
-            w_t: current cash-on-hand
-            c_t: current consumption
-            y_t: current log-income
-            
+            w_t: Current cash-on-hand array.
+            c_t: Current consumption array (should satisfy 0 <= c_t <= w_t).
+            y_t: Current log-income array.
+        
         Returns:
-            w_{t+1} (next period cash-on-hand)
+            Next-period cash-on-hand w_{t+1}.
         """
         return self.params.r * (w_t - c_t) + np.exp(y_t)
     
@@ -103,16 +128,16 @@ class ConsumptionSavingModel:
         eps_t: np.ndarray
     ) -> np.ndarray:
         """
-        Income process transition.
+        Compute next-period log-income via AR(1) process.
         
-        y_{t+1} = rho*y_t + sigma*eps_t
+        Income process: y_{t+1} = rho*y_t + sigma*eps_t
         
         Args:
-            y_t: current log-income
-            eps_t: shocks, N(0,1)
-            
+            y_t: Current log-income array.
+            eps_t: Standard normal shocks, eps_t ~ N(0, 1).
+        
         Returns:
-            y_{t+1} (next period log-income)
+            Next-period log-income y_{t+1}.
         """
         return self.params.rho * y_t + self.params.sigma * eps_t
     
@@ -125,17 +150,24 @@ class ConsumptionSavingModel:
         rng: Optional[np.random.Generator] = None
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
-        Simulate a path of the economy.
+        Simulate a forward path of the consumption-saving economy.
+        
+        Given an initial state and a consumption policy, simulate T periods
+        forward using the model dynamics and collect consumption and utility.
         
         Args:
-            policy_fn: callable(y, w) -> c (consumption policy)
-            y0: initial log-income (batch_size,)
-            w0: initial cash-on-hand (batch_size,)
-            T: time horizon (default: self.params.T)
-            rng: random number generator
-            
+            policy_fn: Callable that takes (y_t, w_t) and returns consumption c_t.
+            y0: Initial log-income array of shape (batch_size,).
+            w0: Initial cash-on-hand array of shape (batch_size,).
+            T: Time horizon (default: self.params.T). If None, uses model horizon.
+            rng: Random number generator. If None, creates new default_rng().
+        
         Returns:
-            (y_path, w_path, c_path, u_path) each of shape (T, batch_size)
+            Tuple of four arrays, each of shape (T, batch_size):
+            - y_path: Log-income path
+            - w_path: Cash-on-hand path
+            - c_path: Consumption path
+            - u_path: Utility path
         """
         if T is None:
             T = self.params.T
@@ -152,19 +184,19 @@ class ConsumptionSavingModel:
         w_t = w0.copy()
         
         for t in range(T):
-            # Get consumption from policy
+            # Evaluate policy function
             c_t = policy_fn(y_t, w_t)
             
-            # Enforce feasibility
+            # Enforce borrowing constraint
             c_t = np.clip(c_t, 0, w_t)
             
-            # Record
+            # Record state and actions
             y_path[t] = y_t
             w_path[t] = w_t
             c_path[t] = c_t
             u_path[t] = self.utility(c_t)
             
-            # Transition to next period
+            # Update state for next period
             eps_next = rng.standard_normal(batch_size)
             w_t = self.state_transition(w_t, c_t, y_t)
             y_t = self.income_transition(y_t, eps_next)
@@ -173,15 +205,15 @@ class ConsumptionSavingModel:
     
     def lifetime_reward(self, u_path: np.ndarray) -> np.ndarray:
         """
-        Compute lifetime reward (discounted sum of utilities).
+        Compute lifetime reward as discounted sum of utilities.
         
-        LR = sum_t beta^t * u(c_t)
+        Lifetime reward: LR = sum_t beta^t * u_t
         
         Args:
-            u_path: utility path of shape (T, batch_size)
-            
+            u_path: Utility path of shape (T, batch_size).
+        
         Returns:
-            lifetime reward for each batch element (batch_size,)
+            Lifetime reward for each sample, shape (batch_size,).
         """
         T = u_path.shape[0]
         discount_factors = np.array([self.params.beta**t for t in range(T)])
@@ -195,25 +227,23 @@ class ConsumptionSavingModel:
         c_next: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Compute Euler equation residual.
+        Compute unit-free Euler equation residuals for complementarity.
         
-        The Euler equation is:
+        Euler equation (before unit-free transformation):
             u'(c_t) = beta * r * E[u'(c_{t+1})]
         
-        Unit-free version:
-            h = 1 - (beta * r * u'(c_next)) / u'(c_t)
-        
-        And slackness:
-            a = 1 - c_t / w_t
+        Unit-free slackness and multiplier:
+            a = 1 - c_t / w_t  (complementary to Lagrange multiplier)
+            h = 1 - (beta*r*u'(c_{t+1})) / u'(c_t)  (Euler residual)
         
         Args:
-            y_t: log-income at t
-            w_t: cash-on-hand at t
-            c_t: consumption at t
-            c_next: consumption at t+1
-            
+            y_t: Log-income at current period (unused but included for context).
+            w_t: Cash-on-hand at current period.
+            c_t: Consumption at current period.
+            c_next: Consumption at next period (from policy or expectation).
+        
         Returns:
-            (a, h) unit-free slackness and Euler residual
+            Tuple (a, h) of unit-free residuals, each of shape matching inputs.
         """
         u_c_t = self.utility_derivative(c_t)
         u_c_next = self.utility_derivative(c_next)
@@ -225,18 +255,22 @@ class ConsumptionSavingModel:
     
     def fischer_burmeister(self, a: np.ndarray, h: np.ndarray) -> np.ndarray:
         """
-        Fischer-Burmeister function for complementarity conditions.
+        Evaluate Fischer-Burmeister (FB) complementarity function.
         
-        Psi^FB(a, h) = a + h - sqrt(a^2 + h^2)
+        FB function: Psi^FB(a, h) = a + h - sqrt(a^2 + h^2)
+        
+        This function encodes the complementary slackness conditions:
+            a >= 0,  h >= 0,  a*h = 0
+        More precisely, Psi^FB = 0 iff all three hold.
         
         Args:
-            a: slackness term
-            h: Lagrange multiplier term
-            
+            a: Slackness term (non-negative).
+            h: Lagrange multiplier term (non-negative).
+        
         Returns:
-            FB residual
+            Fischer-Burmeister residual with same shape as inputs.
         """
-        return a + h - np.sqrt(a**2 + h**2 + 1e-12)  # Add small epsilon for stability
+        return a + h - np.sqrt(a**2 + h**2 + 1e-12)
     
     def weighted_fischer_burmeister(
         self,
@@ -245,17 +279,19 @@ class ConsumptionSavingModel:
         nu: float = 1.0
     ) -> np.ndarray:
         """
-        Weighted Fischer-Burmeister function.
+        Evaluate weighted Fischer-Burmeister function.
         
-        Psi^FB(a, nu*h)
+        Weighted FB: Psi^FB(a, nu*h) = a + nu*h - sqrt(a^2 + (nu*h)^2)
+        
+        The weight nu controls the relative importance of the multiplier term.
         
         Args:
-            a: slackness term
-            h: Lagrange multiplier term
-            nu: weight on h term
-            
+            a: Slackness term.
+            h: Lagrange multiplier term.
+            nu: Weight on multiplier term (default 1.0).
+        
         Returns:
-            weighted FB residual
+            Weighted Fischer-Burmeister residual.
         """
         return self.fischer_burmeister(a, nu * h)
     
@@ -263,18 +299,21 @@ class ConsumptionSavingModel:
         """
         Create Gauss-Hermite quadrature nodes and weights.
         
+        Gauss-Hermite quadrature is used for numerical integration of functions
+        against the standard normal N(0,1) distribution:
+            E[f(X)], X ~ N(0,1) ≈ sum_i w_i * f(x_i)
+        
         Args:
-            n: number of quadrature nodes
-            
+            n: Number of quadrature nodes (higher n = higher accuracy).
+        
         Returns:
-            (nodes, weights) for Gauss-Hermite quadrature
+            Tuple (nodes, weights) where:
+            - nodes: Quadrature points for standard normal, shape (n,)
+            - weights: Integration weights, shape (n,), sum to 1
         """
-        # For Gauss-Hermite: compute roots of Hermite polynomial
-        # and corresponding weights
         from numpy.polynomial.hermite import hermgauss
         nodes, weights = hermgauss(n)
-        # Transform to standard Normal N(0,1):
-        # E[f(eps)] ≈ sum_i w_i f(sqrt(2) * x_i) / sqrt(pi)
+        # Transform from physicist's Hermite to probabilist's (standard normal):
         nodes = nodes * np.sqrt(2.0)
         weights = weights / np.sqrt(np.pi)
         return nodes, weights

@@ -1,0 +1,4 @@
+{"objective": "euler", "check": "policy_curvature", "metric": 0.00024338073309566286, "threshold": 0.0001, "flagged": false, "details": {"per_y": [0.00024581933032436875, 0.0002505775620674605, 0.0002533212031067277, 0.000251906729611, 0.00024591246163637327, 0.0002353567818954904, 0.00022077106302821958]}}
+{"objective": "euler", "check": "policy_overlap", "metric": 1.3774380683898926, "threshold": 0.01, "flagged": false, "details": {"mean_delta": 0.34854626144146805}}
+{"objective": "euler", "check": "share_collapse", "metric": 0.09815323871922246, "threshold": 0.0001, "flagged": false, "details": {"share_ptp": 0.4376327395439148}}
+{"objective": "euler", "check": "wealth_scale_compression", "metric": 3.93007155971956, "threshold": 2.0, "flagged": false, "details": {"p5": 0.6377770105504293, "p50": 1.050663389180634, "p95": 4.567848570269989, "compression_by_bounds": false, "compression_by_range": false, "bounds": [0.5, 2.5]}}

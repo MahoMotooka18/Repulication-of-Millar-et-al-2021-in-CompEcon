@@ -36,15 +36,24 @@ from plot_section4 import SectionPlotter
 
 
 class ExperimentRunner:
-    """Main experiment runner."""
+    """
+    Main experiment orchestrator for Section 4 training and evaluation.
+    
+    Coordinates the full pipeline:
+    - Load configuration from YAML
+    - Initialize model, policy network, and optimizers
+    - Training loop (Algorithm 1 from Maliar et al. 2021)
+    - Periodic evaluation and logging
+    - Plotting and results summarization
+    """
 
-    def __init__(self, config_path: str, device: str = 'cpu'):
+    def __init__(self, config_path: str, device: str = 'cpu') -> None:
         """
-        Initialize experiment runner.
+        Initialize the experiment runner.
 
         Args:
-            config_path: path to config YAML file
-            device: 'cpu' or 'cuda'
+            config_path: Path to YAML configuration file.
+            device: Device for computation ('cpu' or 'cuda').
         """
         self.device = device
         self.config = self._load_config(config_path)
@@ -52,13 +61,31 @@ class ExperimentRunner:
         self.initialize_model()
 
     def _load_config(self, config_path: str) -> Dict:
-        """Load configuration from YAML file."""
+        """
+        Load YAML configuration file.
+        
+        Args:
+            config_path: Path to YAML file.
+        
+        Returns:
+            Configuration dictionary.
+        """
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
         return self._coerce_numeric(config)
 
-    def _coerce_numeric(self, obj):
-        """Safely evaluate numeric expressions in config (e.g., '0.2 * sqrt(...)')."""
+    def _coerce_numeric(self, obj: any) -> any:
+        """
+        Recursively evaluate numeric expressions in configuration.
+        
+        Allows safe numeric expressions like '0.2 * sqrt(0.8)' in YAML.
+        
+        Args:
+            obj: Any configuration value (dict, list, str, or scalar).
+        
+        Returns:
+            Evaluated object with numeric expressions computed.
+        """
         if isinstance(obj, dict):
             return {k: self._coerce_numeric(v) for k, v in obj.items()}
         if isinstance(obj, list):
@@ -71,7 +98,21 @@ class ExperimentRunner:
         return obj
 
     def _safe_eval(self, expr: str):
-        """Evaluate simple numeric expressions with math functions only."""
+        """
+        Safely evaluate numeric expressions.
+        
+        Allows arithmetic operations and safe math functions (sqrt, exp, log, pi, e).
+        Rejects arbitrary code execution.
+        
+        Args:
+            expr: String expression to evaluate.
+        
+        Returns:
+            Numeric result of evaluation.
+        
+        Raises:
+            ValueError: If expression contains unsafe code.
+        """
         allowed_names = {
             'sqrt': math.sqrt,
             'exp': math.exp,
