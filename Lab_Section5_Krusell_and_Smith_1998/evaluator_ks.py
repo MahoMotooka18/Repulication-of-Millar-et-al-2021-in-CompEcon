@@ -281,7 +281,15 @@ class KSEvaluator:
         
         # Aggregate statistics
         y_std = float(np.std(Y_path))
-        corr_yc = float(np.corrcoef(Y_path, C_path)[0, 1])
+        
+        # Compute correlation only if both series have non-zero variance
+        y_var = np.var(Y_path)
+        c_var = np.var(C_path)
+        if y_var > 1e-12 and c_var > 1e-12:
+            corr_yc = float(np.corrcoef(Y_path, C_path)[0, 1])
+        else:
+            # Skip correlation if either series is constant (num_agents=1 case)
+            corr_yc = np.nan
         
         # Wealth inequality
         w_flat = k_path.flatten()
@@ -299,23 +307,30 @@ class KSEvaluator:
         share_top_1 = np.sum(w_sorted[-int(0.01 * n):]) / total_wealth
         
         # KS regression: ln(k_{t+1}) = xi_0 + xi_1 ln(k_t) + xi_2 ln(z_t)
-        k_path = K_path
-        k_t = np.log(k_path[:-1] + 1e-6)
-        k_next = np.log(k_path[1:] + 1e-6)
-        z_t = z_path[:-1]
+        # Skip regression for single-agent economies (num_agents=1) to avoid numerical issues
+        num_agents = w_path.shape[1] if w_path.ndim > 1 else 1
         
-        # Regression
-        X = np.column_stack([np.ones(len(k_t)), k_t, z_t])
-        y_reg = k_next
-        
-        try:
-            beta_hat = np.linalg.lstsq(X, y_reg, rcond=None)[0]
-            y_pred = X @ beta_hat
-            ss_res = np.sum((y_reg - y_pred)**2)
-            ss_tot = np.sum((y_reg - np.mean(y_reg))**2)
-            r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0
-        except:
-            r2 = 0.0
+        if num_agents > 1:
+            k_path = K_path
+            k_t = np.log(k_path[:-1] + 1e-6)
+            k_next = np.log(k_path[1:] + 1e-6)
+            z_t = z_path[:-1]
+            
+            # Regression
+            X = np.column_stack([np.ones(len(k_t)), k_t, z_t])
+            y_reg = k_next
+            
+            try:
+                beta_hat = np.linalg.lstsq(X, y_reg, rcond=None)[0]
+                y_pred = X @ beta_hat
+                ss_res = np.sum((y_reg - y_pred)**2)
+                ss_tot = np.sum((y_reg - np.mean(y_reg))**2)
+                r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0
+            except:
+                r2 = 0.0
+        else:
+            # Skip regression for single-agent case
+            r2 = np.nan
         
         return {
             'std_y': y_std,
