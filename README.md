@@ -127,6 +127,7 @@ duplicate a config file and adjust hyperparameters, paths, and training
 settings to run alternative experiments.
 
 **YAML Parameters**
+
 Section 4 (`configs/section4.yaml`)
 - `seed`: random seed for reproducibility.
 - `model.gamma`: CRRA coefficient.
@@ -200,6 +201,12 @@ Section 5 (`configs/section5.yaml`)
 - `mismatch_checks.wealth_range_threshold`: wealth range mismatch threshold.
 - `mismatch_checks.wealth_quantile_bounds`: acceptable wealth quantile bounds.
 - `input_scaling.enabled`: enable steady-state input scaling.
+
+  **Note**: Implementation reflects `Main_KS.ipynb` reference code and improves accuracy.
+
+  However, may cause "On entry to DLASCL, parameter number 4 had an illegal value" error with small agent counts (e.g., `num_agents < 10`). 
+  
+  If this error occurs, disable this option by setting `enabled: false`.
 - `input_scaling.w_min`: minimum wealth for scaling.
 - `input_scaling.w_max_multiplier`: max wealth multiplier for scaling.
 - `debug.enabled`: enable debug logging.
