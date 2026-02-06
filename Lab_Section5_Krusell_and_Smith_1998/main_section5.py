@@ -237,7 +237,11 @@ class KSExperimentRunnerComplete:
         phi_ss = c_ss / w_ss if w_ss > 0 else 0.5
 
         y_scale = float(cfg.get('y_scale', 2.0 * sigma_y / np.sqrt(1.0 - rho_y**2)))
-        z_scale = float(cfg.get('z_scale', 2.0 * sigma_z / np.sqrt(1.0 - rho_z**2)))
+        # For z_scale: z is real-level, compute stationary std of AR(1)
+        # Var(z) = σ_z^2 / (1 - ρ_z^2), so std(z) = σ_z / sqrt(1 - ρ_z^2)
+        # At steady state z=1, so reasonable bounds are around 1 ± 2*std(z)
+        z_std = sigma_z / np.sqrt(1.0 - rho_z**2)
+        z_scale = float(cfg.get('z_scale', 2.0 * z_std))  # scale ≈ 2 std devs
         w_max_mult = float(cfg.get('w_max_multiplier', 4.0))
         w_min = float(cfg.get('w_min', 0.0))
         w_max = float(cfg.get('w_max', w_max_mult * w_ss))
@@ -394,7 +398,12 @@ class KSExperimentRunnerComplete:
         rng = np.random.default_rng(self.config['seed'])
         w_init = np.full(num_agents, float(self.input_scale_snapshot['w_steady']))
         y_init = np.zeros(num_agents)
-        z_init = 0.0
+        z_init = 1.0  # Aggregate productivity at steady state (real level)
+        # Add initial shock to prevent stddev=0: stronger for Euler/LR, weaker for Bellman
+        if objective_name == 'bellman':
+            z_init = z_init + 1e-6 * self.model.params.sigma_z
+        else:  # 'euler' or 'lifetime_reward'
+            z_init = z_init + 1e-3 * self.model.params.sigma_z
         k_ss = float(self.input_scale_snapshot['steady_state']['K_ss'])
         K_init = k_ss * float(num_agents)
 
@@ -410,10 +419,8 @@ class KSExperimentRunnerComplete:
             self.config['training'].get('num_epochs', 100)
         )
         train_every = self.config['training'].get('train_every', 1)
-        train_points = min(
-            self.config['training'].get('train_points', 100),
-            num_agents
-        )
+        # Paper spec: 100 simulated points per update (always use 100, with replacement if needed)
+        train_points = int(self.config['training'].get('train_points', 100))
         w_sampling_cfg = self.config['training'].get('w_training_sampling', {})
         w_sampling_enabled = bool(w_sampling_cfg.get('enabled', False))
         pretrain_value_iters = (
@@ -498,8 +505,9 @@ class KSExperimentRunnerComplete:
                 update_step += 1
                 optimizer.zero_grad()
 
-                sample_size = min(train_points, num_agents)
-                replace = num_agents < sample_size
+                # Paper spec: always use train_points (100) samples, with replacement if num_agents < 100
+                sample_size = train_points
+                replace = num_agents < train_points
                 sample_idx = rng.choice(
                     num_agents, size=sample_size, replace=replace
                 )
@@ -702,6 +710,7 @@ class KSExperimentRunnerComplete:
                             y_next_2_sample, w_next_2_sample, z_next_2_sample,
                             dist_next_2_sample,
                             w_next_2_raw_sample,
+                            R_next_1, R_next_2,
                             nu_h=self.config['training'].get('nu_h', 1.0),
                             nu=self.config['training'].get('nu', 1.0),
                             input_scale_spec=self.input_scale_spec
@@ -984,7 +993,7 @@ class KSExperimentRunnerComplete:
             # Treat prices as exogenous to any single agent's choice.
             K_price = K_next.detach()
             L_price = L_next.detach()
-            z_level = torch.exp(z_next.detach())
+            z_level = z_next.detach()
 
             if float(K_price.item()) > 0 and float(L_price.item()) > 0:
                 R_next = (

@@ -33,7 +33,7 @@ class KrusellSmithParams:
         delta: Capital depreciation rate
         rho_y: Persistence of idiosyncratic log-productivity
         sigma_y: Volatility of idiosyncratic shocks (adjusted for stationarity)
-        rho_z: Persistence of aggregate log-TFP
+        rho_z: Persistence of aggregate TFP
         sigma_z: Volatility of aggregate shocks
         num_agents: Number of agents in simulation
         horizon: Evaluation time horizon
@@ -212,21 +212,27 @@ class KrusellSmithModel:
         """
         Update aggregate productivity via AR(1) process.
         
-        Aggregate process: z_{t+1} = ρ_z·z_t + σ_z·ε_z_t + shift
-        where shift is applied if use_log_shock_shift=True.
+        Aggregate process: z_{t+1} = ρ_z·z_t + σ_z·ε_z_t
+        where z_t is real-level (not log) aggregate productivity.
         
         Args:
-            z_t: Current log-TFP.
+            z_t: Current real-level aggregate productivity.
             eps_z_t: Standard normal aggregate shock.
         
         Returns:
-            Next-period log-TFP z_{t+1}.
+            Next-period real-level aggregate productivity z_{t+1}.
         """
-        shift = self._z_log_shift if self.params.use_log_shock_shift else 0.0
-        z_next = self.params.rho_z * z_t + self.params.sigma_z * eps_z_t + shift
+        z_next = self.params.rho_z * z_t + self.params.sigma_z * eps_z_t
+        # Enforce bounds: restrict to positive values and reasonable range
         if self.params.enforce_bounds:
+            # z must stay positive; use bounds computed from log-space equivalents
             z_min, z_max = self._z_log_bounds
-            z_next = float(np.clip(z_next, z_min, z_max))
+            z_min_real = np.exp(z_min)
+            z_max_real = np.exp(z_max)
+            z_next = float(np.clip(z_next, z_min_real, z_max_real))
+        else:
+            # Ensure z stays positive even without strict bounds
+            z_next = float(max(z_next, 1e-8))
         return z_next
     
     def production_output(self, z_t: float, K_t: float,
@@ -234,19 +240,21 @@ class KrusellSmithModel:
         """
         Aggregate production.
         
-        Y_t = exp(z_t) * K_t^alpha * L_t^(1-alpha)
+        Y_t = z_t * K_t^alpha * L_t^(1-alpha)
         where L_t = sum_i exp(y_t^i) (Eq. 42).
         
         Args:
-            z_t: aggregate productivity
+            z_t: aggregate productivity (real level, not log)
             K_t: aggregate capital
             total_labor: sum_i exp(y_t^i)
             
         Returns:
             output Y_t
         """
-        z_level = np.exp(z_t)
-        return z_level * (K_t**self.params.alpha) * (total_labor**(1 - self.params.alpha))
+        if K_t > 0 and total_labor > 0:
+            return z_t * (K_t**self.params.alpha) * (total_labor**(1 - self.params.alpha))
+        else:
+            return 0.0
     
     def factor_prices(
         self,
@@ -257,11 +265,11 @@ class KrusellSmithModel:
         """
         Equilibrium factor prices.
         
-        R_t = 1 - delta + exp(z_t) * alpha * K_t^(alpha-1) * L_t^(1-alpha)
-        W_t = exp(z_t) * (1-alpha) * K_t^alpha * L_t^(-alpha)
+        R_t = 1 - delta + z_t * alpha * K_t^(alpha-1) * L_t^(1-alpha)
+        W_t = z_t * (1-alpha) * K_t^alpha * L_t^(-alpha)
         
         Args:
-            z_t: aggregate productivity
+            z_t: aggregate productivity (real level, not log)
             K_t: aggregate capital
             total_labor: sum_i exp(y_t^i)
             
@@ -270,19 +278,18 @@ class KrusellSmithModel:
         """
         alpha = self.params.alpha
         delta = self.params.delta
-        z_level = np.exp(z_t)
         
         # Interest rate
         if K_t > 0:
-            R_t = 1 - delta + z_level * alpha * (K_t**(alpha - 1)) * (total_labor**(1 - alpha))
+            R_t = 1 - delta + z_t * alpha * (K_t**(alpha - 1)) * (total_labor**(1 - alpha))
         else:
             R_t = 1 - delta
         
         # Wage
         if K_t > 0 and total_labor > 0:
-            W_t = z_level * (1 - alpha) * (K_t**alpha) / (total_labor**alpha)
+            W_t = z_t * (1 - alpha) * (K_t**alpha) / (total_labor**alpha)
         else:
-            W_t = z_level * (1 - alpha)
+            W_t = z_t * (1 - alpha)
         
         return R_t, W_t
     

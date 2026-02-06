@@ -662,6 +662,7 @@ class KSExperimentRunnerComplete:
                             y_next_2_sample, w_next_2_sample, z_next_2_sample,
                             dist_next_2_sample,
                             w_next_2_raw_sample,
+                            R_next_1, R_next_2,
                             nu_h=self.config['training'].get('nu_h', 1.0),
                             nu=self.config['training'].get('nu', 1.0),
                             input_scale_spec=self.input_scale_spec

@@ -1,0 +1,4 @@
+{"objective": "bellman", "check": "policy_curvature", "metric": 1.4730439994612242e-06, "threshold": 0.0001, "flagged": true, "details": {"per_y": [1.733642814428086e-06, 1.6443090256485796e-06, 1.5576516369902447e-06, 1.4604170409231139e-06, 1.3875943377844143e-06, 1.3039720557012722e-06, 1.2237210847528588e-06]}}
+{"objective": "bellman", "check": "policy_overlap", "metric": 0.0027589224765647846, "threshold": 0.01, "flagged": true, "details": {"mean_delta": 0.002203960176463703}}
+{"objective": "bellman", "check": "share_collapse", "metric": 0.0018619095835494016, "threshold": 0.0001, "flagged": false, "details": {"share_ptp": 0.008102864027023315}}
+{"objective": "bellman", "check": "wealth_scale_compression", "metric": 16.42033925460904, "threshold": 2.0, "flagged": false, "details": {"p5": 1.1559882412608582, "p50": 2.077221375110863, "p95": 17.576327495869897, "compression_by_bounds": false, "compression_by_range": false, "bounds": [0.5, 2.5]}}
