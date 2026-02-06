@@ -236,6 +236,8 @@ class KSObjectiveComputer:
         z_next_2: torch.Tensor,
         dist_features_next_2: torch.Tensor,
         w_raw_next_2: torch.Tensor,
+        R_next_1: float,
+        R_next_2: float,
         nu_h: float = 1.0,
         nu: float = 1.0,
         input_scale_spec: InputScaleSpec = InputScaleSpec()
@@ -327,15 +329,11 @@ class KSObjectiveComputer:
         
         # ===== Lagrange multiplier from FOC (Section 4 pattern, with interest rates) =====
         # λ = 1 - (β·R·∂V/∂w')/u'(c)
-        # For Krusell-Smith: Interest rates R are endogenous, computed from state
-        # R = α·Z·(K/L)^(α-1) where K is aggregate capital, L is labor supply
-        # Use average interest rate as conservative estimate
-        
-        # Compute interest rate from aggregate state (z_t = log(Z_t))
-        # R = α·exp(z_t)·(K/1)^(α-1) ≈ α·exp(z_t) when K normalized
-        alpha = self.model.params.alpha
-        R_t_1 = alpha * torch.exp(z_next_1)  # Interest rate at next period
-        R_t_2 = alpha * torch.exp(z_next_2)
+        # For Krusell-Smith: Interest rates R are computed from equilibrium factor prices
+        # R_t = 1 - δ + z_t·α·K_t^(α-1)·L_t^(1-α) (see model.factor_prices)
+        # Pass R from caller (computed from aggregate capital and labor in main_section5.py)
+        R_t_1 = R_next_1
+        R_t_2 = R_next_2
         
         u_c_next_1 = c_next_1**(-gamma)
         u_c_next_2 = c_next_2**(-gamma)

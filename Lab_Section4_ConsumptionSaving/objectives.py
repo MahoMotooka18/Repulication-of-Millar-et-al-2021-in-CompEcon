@@ -250,19 +250,23 @@ class ObjectiveComputer:
         a = 1.0 - c / (w_batch + eps_guard)
         a = torch.clamp(a, min=0.0)
 
-        # ===== Lagrange multiplier from FOC =====
+        # ===== Policy network multiplier estimate (for FB term) =====
+        # h from policy network (Eq. 32 second term: Ψ^FB(a, 1-h)²)
+        h = policy.forward_h(y_batch, w_batch)
+
+        # ===== Fischer-Burmeister complementarity (Eq. 32 second term) =====
+        # Ψ^FB(a, 1-h) = a + (1-h) - √(a² + (1-h)²)
+        # Computed once with policy h, then squared (NOT product of two independent computations)
+        fb = self._fischer_burmeister_batch(a, 1.0 - h)
+        loss_fb = torch.mean(fb ** 2)
+
+        # ===== Lagrange multiplier from FOC (for multiplier consistency term) =====
         # λ = 1 - (β·r·∂V/∂w')/u'(c)
-        # This represents the KKT multiplier on the borrowing constraint
+        # This represents the KKT multiplier on the borrowing constraint, computed from value function
         h_1 = 1.0 - (self.model.params.beta * self.model.params.r * dV_dw_1) / (u_c_deriv + eps_guard)
         h_2 = 1.0 - (self.model.params.beta * self.model.params.r * dV_dw_2) / (u_c_deriv + eps_guard)
         h_1 = torch.clamp(h_1, min=0.0)
         h_2 = torch.clamp(h_2, min=0.0)
-
-        # ===== Fischer-Burmeister complementarity (Eq. 32 second term) =====
-        # Ψ^FB(a, h) = a + h - √(a² + h²)
-        fb_1 = self._fischer_burmeister_batch(a, h_1)
-        fb_2 = self._fischer_burmeister_batch(a, h_2)
-        loss_fb = torch.mean(fb_1 * fb_2)
 
         # ===== Multiplier consistency (AiO, Eq. 32 third term) =====
         # Enforce h·a ≈ 0 under both shock realizations
