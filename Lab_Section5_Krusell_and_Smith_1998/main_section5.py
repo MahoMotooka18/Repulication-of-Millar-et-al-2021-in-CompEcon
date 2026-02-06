@@ -406,18 +406,6 @@ class KSExperimentRunnerComplete:
         else:  # 'euler' or 'lifetime_reward'
             z_init = z_init + 1e-3 * self.model.params.sigma_z
         
-        # Numerical stability: For small agent counts, introduce initial wealth dispersion
-        # to prevent singular distributions (all agents identical) that cause numerical issues.
-        # This is critical for lifetime_reward objective with num_agents < 10.
-        if num_agents < 10:
-            rng_init = np.random.default_rng(self.config['seed'] + num_agents)
-            w_noise_scale = 0.05 * w_steady  # 5% noise around steady state
-            w_init = w_init + rng_init.normal(0, w_noise_scale, num_agents)
-            w_init = np.maximum(w_init, 0.01)  # Ensure non-negative wealth
-            
-            y_noise_scale = 0.05  # 5% noise around zero productivity
-            y_init = y_init + rng_init.normal(0, y_noise_scale, num_agents)
-        
         k_ss = float(self.input_scale_snapshot['steady_state']['K_ss'])
         K_init = k_ss * float(num_agents)
 
