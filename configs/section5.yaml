@@ -96,9 +96,6 @@ mismatch_checks:
   wealth_quantile_bounds: [0.5, 2.5]
 
 # Policy input scaling (steady-state units)
-# NOTE: Reflects Main_KS.ipynb implementation. Improves accuracy but may cause
-# "On entry to DLASCL, parameter number 4 had an illegal value" error with small agent counts.
-# If this error occurs, set enabled: false
 input_scaling:
   enabled: true
   w_min: 0.0
