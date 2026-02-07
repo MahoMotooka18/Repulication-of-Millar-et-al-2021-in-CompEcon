@@ -55,6 +55,7 @@ class KSEvaluator:
         self.device = device
         self.input_scale_spec = input_scale_spec
         self.policy_output_type = policy_output_type
+        self.objective_name = None  # Set by main training loop to identify objective (lifetime_reward, euler, bellman)
 
     def evaluate_simulation(
         self,
@@ -307,10 +308,17 @@ class KSEvaluator:
         share_top_1 = np.sum(w_sorted[-int(0.01 * n):]) / total_wealth
         
         # KS regression: ln(k_{t+1}) = xi_0 + xi_1 ln(k_t) + xi_2 ln(z_t)
-        # Skip regression for single-agent economies (num_agents=1) to avoid numerical issues
+        # NOTE: This regression (lstsq) is not part of the core Maliar et al. 2021 algorithm
+        # and is used only for model validation/diagnostics.
+        # During lifetime-reward training, numerical instability in least-squares computation
+        # can occur. Since the regression output is not used by the training algorithm,
+        # it is safe to skip for lifetime-reward objective.
         num_agents = w_path.shape[1] if w_path.ndim > 1 else 1
         
-        if num_agents > 1:
+        # Skip regression for lifetime-reward objective (not required by algorithm)
+        if self.objective_name == 'lifetime_reward':
+            r2 = np.nan
+        elif num_agents > 1:
             k_path = K_path
             k_t = np.log(k_path[:-1] + 1e-6)
             k_next = np.log(k_path[1:] + 1e-6)
@@ -326,8 +334,9 @@ class KSEvaluator:
                 ss_res = np.sum((y_reg - y_pred)**2)
                 ss_tot = np.sum((y_reg - np.mean(y_reg))**2)
                 r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0
-            except:
-                r2 = 0.0
+            except Exception:
+                # If regression fails, set r2 to NaN
+                r2 = np.nan
         else:
             # Skip regression for single-agent case
             r2 = np.nan

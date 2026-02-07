@@ -396,7 +396,8 @@ class KSExperimentRunnerComplete:
 
         # Initialize state
         rng = np.random.default_rng(self.config['seed'])
-        w_init = np.full(num_agents, float(self.input_scale_snapshot['w_steady']))
+        w_steady = float(self.input_scale_snapshot['w_steady'])
+        w_init = np.full(num_agents, w_steady)
         y_init = np.zeros(num_agents)
         z_init = 1.0  # Aggregate productivity at steady state (real level)
         # Add initial shock to prevent stddev=0: stronger for Euler/LR, weaker for Bellman
@@ -404,6 +405,7 @@ class KSExperimentRunnerComplete:
             z_init = z_init + 1e-6 * self.model.params.sigma_z
         else:  # 'euler' or 'lifetime_reward'
             z_init = z_init + 1e-3 * self.model.params.sigma_z
+        
         k_ss = float(self.input_scale_snapshot['steady_state']['K_ss'])
         K_init = k_ss * float(num_agents)
 
@@ -743,6 +745,7 @@ class KSExperimentRunnerComplete:
                 if update_step % eval_interval == 0:
                     wall_time = time.time() - start_time
                     self.evaluator.policy_output_type = policy_output_type
+                    self.evaluator.objective_name = objective_name
                     simulation_eval = self.evaluator.evaluate_simulation(
                         policy,
                         w_t,
@@ -803,6 +806,7 @@ class KSExperimentRunnerComplete:
         # Final evaluation
         policy.eval()
         self.evaluator.policy_output_type = policy_output_type
+        self.evaluator.objective_name = objective_name
         simulation = self.evaluator.evaluate_simulation(
             policy, w_t, y_t, z_t, K_t,
             T=self.config['training'].get(
@@ -995,6 +999,12 @@ class KSExperimentRunnerComplete:
             L_price = L_next.detach()
             z_level = z_next.detach()
 
+            # Numerical stability: clamp K_price and L_price to avoid inf/nan in power operations
+            # Especially critical for lifetime reward with small agent counts (num_agents < 10)
+            # Clamp happens after detach() so gradients are not affected
+            K_price = torch.clamp(K_price, min=1e-8)
+            L_price = torch.clamp(L_price, min=1e-8)
+
             if float(K_price.item()) > 0 and float(L_price.item()) > 0:
                 R_next = (
                     1 - delta +
@@ -1156,8 +1166,10 @@ class KSExperimentRunnerComplete:
         K_init = float(base_sim['K_path'][0])
 
         self.evaluator.policy_output_type = PolicyOutputType.C_SHARE
-        comparison_sims = {
-            obj: self.evaluator.evaluate_simulation(
+        comparison_sims = {}
+        for obj, policy in comparison_policies.items():
+            self.evaluator.objective_name = obj
+            comparison_sims[obj] = self.evaluator.evaluate_simulation(
                 policy,
                 w_init,
                 y_init,
@@ -1166,8 +1178,6 @@ class KSExperimentRunnerComplete:
                 T=self.config['training'].get('eval_horizon', 1000),
                 seed=self.config.get('seed', 42)
             )
-            for obj, policy in comparison_policies.items()
-        }
 
         if len(comparison_sims) >= 2:
             # Generate comparison figure

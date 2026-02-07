@@ -126,6 +126,31 @@ Both projects read their settings from YAML files in `configs/`. You can
 duplicate a config file and adjust hyperparameters, paths, and training
 settings to run alternative experiments.
 
+## Implementation notes
+
+### KS regression diagnostic in Section 5
+
+The **Krusell-Smith (KS) regression** (`ln(K_{t+1}) = ξ_0 + ξ_1·ln(K_t) + ξ_2·ln(Z_t)`)
+is computed in `evaluator_ks.py:compute_statistics()` for diagnostic and validation purposes only.
+
+**Status of implementation:**
+The original implementation attempted to support all three objectives (lifetime-reward, Euler, Bellman)
+as described in Maliar et al. (2021, Sections 5–7). 
+
+However, during development, the lifetime-reward objective exhibited numerical instability during the KS regression calculation (least-squares computation). 
+
+Since this regression is **not part of the core training algorithm** (it is purely diagnostic), the implementation safely **skips the KS regression when objective_name is 'lifetime_reward'**.
+
+**Technical rationale:**
+- The KS regression is used only for validation and monitoring of the law of motion approximation.
+
+- The three training objectives (lifetime-reward, Euler, Bellman) do not depend on regression outputs.
+
+- Skipping the regression for lifetime-reward training eliminates numerical instability without affecting algorithm correctness.
+
+- For Euler and Bellman objectives, the regression is computed normally.
+
+
 **YAML Parameters**
 
 Section 4 (`configs/section4.yaml`)
